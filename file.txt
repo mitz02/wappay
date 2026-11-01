@@ -1,0 +1,1542 @@
+# MASTER PROJECT SPECIFICATION: AI-POWERED CONVERSATIONAL FINANCIAL PLATFORM
+
+## 1. ROLE AND EXPECTATIONS
+
+Act as a principal fintech software architect, senior backend engineer, financial systems engineer, application security engineer and experienced frontend engineer.
+
+Your responsibility is to design and implement a robust, secure, extensible, AI-powered conversational financial platform.
+
+This is not a conventional banking application with a chatbot attached.
+
+It is a conversational financial assistant through which customers interact with financial services using natural language and voice messages, primarily through WhatsApp.
+
+The system must be engineered with banking-grade architectural principles, strong transaction integrity, strict security boundaries, traceability, fault tolerance and reliable financial recordkeeping.
+
+Do not build a superficial prototype that only looks functional.
+
+Do not implement fake financial operations and present them as genuine transactions.
+
+During development, use sandbox financial providers and clearly identify simulated transactions.
+
+Production financial operations must remain disabled until the appropriate licensed financial partner, regulatory approvals, security reviews and operational controls are established.
+
+---
+
+# 2. PRODUCT VISION
+
+Build a conversational financial platform that allows customers to interact with financial services naturally.
+
+A customer should be able to send a WhatsApp message such as:
+
+- Send ₦2,000 to Mum.
+- Transfer ₦5,000 to John.
+- How much money do I have?
+- Show my last five transactions.
+- Buy ₦1,000 airtime.
+- Buy 2GB data.
+- What did I spend yesterday?
+- Send airtime to this phone number.
+- Did my last transfer go through?
+- Send ₦3,000 to my saved electricity payment recipient.
+
+The assistant should understand the request, identify the required information, validate the request, obtain secure authorization and communicate with the appropriate financial service.
+
+The experience should feel like having a personal financial assistant rather than interacting with a traditional banking interface.
+
+## Primary product interfaces
+
+### A. WhatsApp interface
+
+This is the primary customer-facing interface.
+
+Customers interact through WhatsApp text and voice messages.
+
+The platform must support:
+
+- Incoming text messages.
+- Incoming voice notes.
+- Voice-to-text processing.
+- Natural-language understanding.
+- Context-aware conversations.
+- Transaction summaries.
+- Secure transaction confirmation flows.
+- Transaction notifications.
+- Transaction history queries.
+- Airtime and data purchases.
+- Financial assistance and support conversations.
+
+### B. Web application
+
+The web application is exclusively for administrators.
+
+There must be NO customer login, customer dashboard, customer registration page or customer-facing financial dashboard in the web application.
+
+The web application must provide:
+
+- Secure administrator login.
+- Administrator dashboard.
+- User management.
+- Transaction monitoring.
+- Financial reconciliation.
+- Financial reports.
+- Audit logs.
+- Provider management.
+- System configuration.
+- Security monitoring.
+- Support and dispute management.
+- Administrative role and permission management.
+
+Do not accidentally introduce a customer-facing web application.
+
+---
+
+# 3. TECHNOLOGY STACK
+
+Use the following stack unless a technically justified alternative is necessary.
+
+## Backend
+
+- Node.js
+- TypeScript
+- NestJS
+- PostgreSQL
+- Prisma ORM
+- Redis
+- BullMQ
+- REST API
+- WebSocket where genuinely required
+
+## AI and conversational processing
+
+- OpenAI API or an interchangeable LLM provider.
+- Speech-to-text provider for voice notes.
+- Optional text-to-speech provider.
+- Structured JSON output for intent extraction.
+- Strict validation of AI-generated output.
+
+The AI provider must be replaceable through an abstraction layer.
+
+## Web administration
+
+- Next.js
+- React
+- TypeScript
+- Tailwind CSS
+- A suitable accessible component system.
+
+## Infrastructure
+
+- Docker
+- Docker Compose for local development.
+- GitHub Actions for CI/CD.
+- Structured application logging.
+- Sentry or an equivalent error-monitoring system.
+- Environment-specific configuration.
+
+---
+
+# 4. ARCHITECTURAL PRINCIPLES
+
+Use a modular monolith initially, with clearly defined domain boundaries.
+
+Do not introduce microservices merely for architectural appearance.
+
+The system must be designed so that individual modules can eventually be extracted into independent services without rewriting the entire application.
+
+Apply:
+
+- Domain-driven design principles.
+- Separation of concerns.
+- Dependency inversion.
+- Explicit service boundaries.
+- Repository patterns where appropriate.
+- Application services.
+- Domain services.
+- Strict DTO validation.
+- Strong typing.
+- Explicit transaction boundaries.
+- Centralized exception handling.
+- Immutable financial records.
+- Explicit state machines for financial operations.
+
+Business logic must not live inside controllers.
+
+Controllers should handle HTTP concerns and delegate business operations to application services.
+
+Financial rules must not be implemented inside AI handlers.
+
+AI must never directly modify financial balances or execute financial operations.
+
+---
+
+# 5. REQUIRED BACKEND MODULES
+
+Design the backend as independent, well-defined modules.
+
+## 5.1 Authentication and identity module
+
+Responsibilities:
+
+- WhatsApp identity registration.
+- Customer identity management.
+- Administrator authentication.
+- Session management.
+- Secure credential management.
+- Authentication challenges.
+- OTP verification where supported.
+- Customer transaction authorization.
+- Administrator MFA.
+- Device and session tracking.
+- Authentication audit records.
+
+WhatsApp phone numbers must not automatically be treated as sufficient proof of authorization for financial transactions.
+
+A WhatsApp identity must be linked to an appropriately verified customer identity.
+
+Implement an authentication mechanism suitable for the financial partner's approved security model.
+
+Never store passwords, PINs, OTPs or authentication secrets in plaintext.
+
+Use secure password hashing for administrator credentials.
+
+Support rate limiting and temporary lockouts for repeated failed authentication attempts.
+
+Administrator sessions must use secure cookies, appropriate expiration and session revocation.
+
+## 5.2 Customer management module
+
+Manage:
+
+- Customer records.
+- Customer status.
+- Customer verification status.
+- WhatsApp phone numbers.
+- Linked financial identities.
+- Account references.
+- Customer preferences.
+- Saved recipients.
+- Account restrictions.
+- Transaction limits.
+- Customer activity history.
+
+Support statuses such as:
+
+- PENDING_VERIFICATION
+- ACTIVE
+- SUSPENDED
+- RESTRICTED
+- CLOSED
+
+Every status change must have an audit record and an authorized reason.
+
+## 5.3 Recipient management module
+
+Customers should be able to save recipients using names.
+
+Example:
+
+"Mum" -> Bank account belonging to the customer's saved recipient.
+
+Support:
+
+- Recipient creation.
+- Recipient updates.
+- Recipient verification.
+- Recipient deletion.
+- Recipient aliases.
+- Bank selection.
+- Account number references.
+- Recipient ownership or name enquiry where supported.
+
+Never assume that two recipients with the same display name are identical.
+
+If a customer says "send money to Mum" and multiple possible recipients exist, request clarification.
+
+Before a transfer, show the actual destination account name, bank, amount and applicable charges.
+
+## 5.4 Conversational AI module
+
+Responsibilities:
+
+- Message classification.
+- Intent extraction.
+- Entity extraction.
+- Conversation context.
+- Recipient resolution assistance.
+- Missing-information detection.
+- Natural-language response generation.
+- Voice-note transcription integration.
+- AI provider abstraction.
+
+Supported intent examples:
+
+- TRANSFER
+- CHECK_BALANCE
+- TRANSACTION_HISTORY
+- BUY_AIRTIME
+- BUY_DATA
+- PAYMENT_STATUS
+- RECIPIENT_MANAGEMENT
+- HELP
+- UNKNOWN
+
+AI responses that initiate financial actions must produce validated structured instructions.
+
+Example:
+
+{
+  "intent": "TRANSFER",
+  "amount": 2000,
+  "currency": "NGN",
+  "recipient_alias": "Mum",
+  "confidence": 0.98,
+  "missing_fields": []
+}
+
+This is an example of an AI proposal, not an authorized transaction.
+
+Validate every field independently using backend rules.
+
+Never trust the AI's confidence score as financial authorization.
+
+Never allow the AI to:
+
+- Execute database queries directly.
+- Modify balances.
+- Create ledger entries.
+- Bypass authentication.
+- Approve its own financial operations.
+- Override transaction limits.
+- Invent transaction success.
+- Generate authoritative transaction references.
+
+All financial operations must pass through dedicated application services.
+
+## 5.5 Account and financial provider module
+
+Build a provider abstraction layer.
+
+The platform must not depend on one specific financial provider.
+
+Define explicit interfaces for:
+
+- Account creation.
+- Virtual account assignment.
+- Account verification.
+- Balance retrieval where supported.
+- Funds collection.
+- Bank transfers.
+- Transfer status enquiries.
+- Account name enquiries.
+- Transaction verification.
+- Webhook processing.
+- Refunds or reversals where supported.
+
+Each provider adapter must implement the same internal contract.
+
+Never allow provider-specific API logic to spread throughout the application.
+
+The platform must support sandbox credentials independently of production credentials.
+
+Production mode must be disabled by default.
+
+Do not assume that receiving funds into a virtual account automatically grants the platform permission to hold customer balances. The financial partner's licensed model must explicitly support the intended arrangement.
+
+## 5.6 Transaction management module
+
+This is one of the most important modules.
+
+Treat transaction processing as a critical financial subsystem.
+
+Every financial operation must have:
+
+- Unique internal transaction ID.
+- Unique idempotency key.
+- Customer reference.
+- Transaction type.
+- Amount.
+- Currency.
+- Fee information.
+- Provider reference.
+- Destination reference where applicable.
+- Current transaction state.
+- Creation timestamp.
+- Last update timestamp.
+- Relevant audit information.
+
+Supported transaction types should include:
+
+- TRANSFER
+- DEPOSIT
+- WITHDRAWAL
+- AIRTIME_PURCHASE
+- DATA_PURCHASE
+- PAYMENT
+- REFUND
+- REVERSAL
+- FEE
+- ADJUSTMENT
+
+Implement an explicit transaction state machine.
+
+Suggested states:
+
+- CREATED
+- VALIDATING
+- AWAITING_AUTHORIZATION
+- AUTHORIZED
+- PROCESSING
+- SUCCESSFUL
+- FAILED
+- PENDING
+- REQUIRES_RECONCILIATION
+- REVERSED
+- CANCELLED
+
+Define valid transitions centrally.
+
+Do not allow arbitrary state updates.
+
+A transaction marked SUCCESSFUL must never be changed to FAILED merely because a later network request timed out.
+
+An uncertain provider response must be treated as an uncertain transaction, not an automatic failure.
+
+Use provider status enquiries and reconciliation to resolve uncertain outcomes.
+
+### Transaction lifecycle
+
+A transfer should follow this general lifecycle:
+
+1. Receive the customer's request.
+2. Parse the request into structured data.
+3. Validate the amount and currency.
+4. Resolve the recipient.
+5. Verify the destination details.
+6. Check applicable account and transaction limits.
+7. Calculate applicable fees.
+8. Generate a transaction preview.
+9. Request secure customer authorization.
+10. Validate the authorization.
+11. Create the transaction record.
+12. Apply appropriate internal transaction controls.
+13. Submit the instruction to the financial provider.
+14. Record the provider response.
+15. Process verified provider webhooks.
+16. Confirm the final outcome.
+17. Update the accounting ledger according to the financial event.
+18. Notify the customer.
+19. Make the transaction available in transaction history.
+
+The exact order of internal reservations, ledger posting and provider submission must be designed around the partner's settlement and custody model.
+
+Do not assume that every transfer can be treated as an instantaneous operation.
+
+### Idempotency
+
+Implement idempotency for all financial operations.
+
+If the same request is submitted multiple times, the system must not execute duplicate transfers.
+
+Idempotency must cover:
+
+- Customer-initiated requests.
+- Provider API submissions.
+- Webhook processing.
+- Background job retries.
+- Administrative retry actions.
+
+Use database-enforced uniqueness constraints.
+
+Do not depend on an in-memory cache as the only protection against duplicate transactions.
+
+### Concurrency protection
+
+Protect against simultaneous requests that could cause incorrect balances or duplicate operations.
+
+Use appropriate database transactions, locking strategies and isolation levels.
+
+Define and test invariants for:
+
+- Account balances.
+- Available balances.
+- Reserved funds.
+- Transaction uniqueness.
+- Ledger consistency.
+- Concurrent withdrawals.
+- Concurrent transfers.
+- Duplicate provider callbacks.
+
+Never rely on a simple application-level balance check without protecting against concurrent modifications.
+
+---
+
+# 6. DOUBLE-ENTRY ACCOUNTING LEDGER
+
+Implement a proper double-entry ledger.
+
+Do not use a mutable balance field as the sole source of financial truth.
+
+The ledger must provide an auditable record of financial movements.
+
+Each posted financial event must create balanced debit and credit entries.
+
+For every journal:
+
+TOTAL DEBITS = TOTAL CREDITS
+
+Use an appropriate integer representation of currency in minor units, or a rigorously defined decimal strategy.
+
+For Nigerian naira, document the currency precision and conversion rules.
+
+Never use JavaScript floating-point arithmetic for financial calculations.
+
+The ledger must support:
+
+- Chart of accounts.
+- Customer-related accounts where appropriate to the licensed model.
+- Settlement accounts.
+- Provider clearing accounts.
+- Fee revenue accounts.
+- Expense accounts.
+- Suspense accounts.
+- Reversal journals.
+- Adjustments.
+- Journal references.
+- Immutable posted entries.
+
+A posted journal must never be edited or deleted.
+
+Corrections must use compensating entries and explicit reversal references.
+
+Implement ledger posting within appropriate database transaction boundaries.
+
+Ensure that the accounting model correctly represents the licensed partner's actual custody, settlement and safeguarding arrangement. Do not invent customer deposits or platform liabilities that do not exist in the real financial arrangement.
+
+## Ledger invariants
+
+1. Every posted journal balances.
+2. Posted entries are immutable.
+3. Every journal has a unique reference.
+4. Reversals reference the original journal.
+5. Duplicate events cannot create duplicate postings.
+6. Ledger totals can be independently reconciled.
+7. No transaction may silently change historical financial records.
+
+---
+
+# 7. BALANCE AND ACCOUNTING MANAGEMENT
+
+Distinguish clearly between:
+
+- Provider-reported balance.
+- Ledger balance.
+- Available balance.
+- Reserved balance.
+- Pending transaction amount.
+- Settlement balance.
+
+Do not assume these figures are always identical.
+
+Define exactly how each figure is calculated.
+
+If the product uses a licensed partner's wallet or ledger, establish which system is authoritative for each balance type.
+
+Implement reconciliation procedures that compare internal financial records with the financial partner's records.
+
+Never silently modify balances to make discrepancies disappear.
+
+Unexplained discrepancies must generate alerts and reconciliation cases.
+
+---
+
+# 8. WEBHOOK AND EVENT PROCESSING
+
+Financial provider webhooks must be treated as untrusted external input.
+
+Implement:
+
+- Signature verification.
+- Provider-specific authentication.
+- Timestamp validation where supported.
+- Replay protection.
+- Event deduplication.
+- Idempotent processing.
+- Schema validation.
+- Persistent event storage.
+- Processing status.
+- Retry mechanisms.
+- Dead-letter handling.
+- Alerting for repeated failures.
+
+Persist incoming events before processing them where appropriate.
+
+Do not acknowledge an event as successfully processed before it has been durably accepted.
+
+Webhook processing must be safe when:
+
+- The same event arrives multiple times.
+- Events arrive out of order.
+- The provider retries after a timeout.
+- The application restarts.
+- A worker crashes during processing.
+- A transaction is already completed.
+
+Never treat a customer-facing message or an unverified webhook body as proof of payment.
+
+Verify final financial outcomes using the provider's documented verification mechanism.
+
+---
+
+# 9. DATABASE DESIGN
+
+Design a normalized PostgreSQL database with explicit foreign keys, indexes, constraints and appropriate deletion policies.
+
+Potential tables include:
+
+### Identity and customers
+
+- users
+- customer_profiles
+- whatsapp_identities
+- administrator_accounts
+- administrator_roles
+- permissions
+- role_permissions
+- user_sessions
+- authentication_events
+- verification_records
+
+### Recipients and accounts
+
+- recipients
+- recipient_aliases
+- financial_accounts
+- provider_accounts
+- account_status_history
+
+### Transactions
+
+- transactions
+- transaction_events
+- transaction_authorizations
+- transaction_attempts
+- transaction_fees
+- transaction_limits
+- idempotency_records
+
+### Accounting
+
+- ledger_accounts
+- ledger_journals
+- ledger_entries
+- ledger_reversals
+- reconciliation_runs
+- reconciliation_items
+
+### Conversations
+
+- conversations
+- messages
+- conversation_context
+- ai_intent_records
+- voice_transcriptions
+
+### Infrastructure and integrations
+
+- financial_providers
+- provider_webhook_events
+- webhook_delivery_attempts
+- notification_records
+- background_job_records
+- outbox_events
+- inbox_events
+
+### Administration and security
+
+- audit_logs
+- admin_activity_logs
+- security_events
+- system_settings
+- support_cases
+- dispute_records
+
+The list is a starting point, not a requirement to create unnecessary tables.
+
+Design each table based on clear domain responsibilities.
+
+Use migrations for every schema change.
+
+Avoid destructive migrations without explicit safeguards.
+
+Add appropriate database constraints instead of relying exclusively on application validation.
+
+---
+
+# 10. DATABASE AND TRANSACTION SAFETY
+
+Implement:
+
+- Database transactions for critical financial operations.
+- Unique constraints for transaction references.
+- Foreign key constraints.
+- Appropriate indexes.
+- Optimistic or pessimistic concurrency control where suitable.
+- Explicit transaction isolation decisions.
+- Safe retry handling.
+- Consistent locking order.
+- Deadlock handling.
+- Database connection management.
+
+Use a transactional outbox pattern for reliable publication of important events.
+
+Use an inbox or equivalent deduplication mechanism for incoming external events.
+
+Avoid distributed transactions unless a specific architecture genuinely requires them.
+
+Never claim that a PostgreSQL transaction automatically makes an external provider API call atomic with the database.
+
+Design explicit recovery procedures for failures between local persistence and external provider execution.
+
+---
+
+# 11. API CONTRACTS
+
+All internal and external API endpoints must have clearly defined contracts.
+
+Use REST conventions and version the API.
+
+Example:
+
+/api/v1/auth
+/api/v1/customers
+/api/v1/recipients
+/api/v1/accounts
+/api/v1/transactions
+/api/v1/ledger
+/api/v1/providers
+/api/v1/webhooks
+/api/v1/conversations
+/api/v1/admin
+
+Define:
+
+- Request DTOs.
+- Response DTOs.
+- Validation rules.
+- Error codes.
+- HTTP status codes.
+- Authentication requirements.
+- Authorization requirements.
+- Idempotency requirements.
+- Pagination.
+- Rate limits.
+
+Generate and maintain OpenAPI/Swagger documentation.
+
+Never expose internal provider credentials, authentication secrets, private financial metadata or sensitive customer information through public API responses.
+
+Use explicit response serializers rather than returning database entities directly.
+
+---
+
+# 12. SECURITY ARCHITECTURE
+
+Security must be considered from the beginning, not added at the end.
+
+Implement a documented threat model and security controls.
+
+## Authentication security
+
+- Strong administrator authentication.
+- MFA for administrators.
+- Secure password hashing.
+- Secure session handling.
+- Session revocation.
+- Rate limiting.
+- Login attempt monitoring.
+- OTP expiration and single-use validation where applicable.
+- Secure transaction authorization.
+
+## Authorization
+
+Implement role-based access control.
+
+Suggested administrator roles:
+
+- SUPER_ADMIN
+- OPERATIONS_ADMIN
+- FINANCE_ADMIN
+- SUPPORT_ADMIN
+- AUDITOR
+
+Define permissions independently from role names.
+
+Apply authorization checks inside backend services and guards.
+
+Do not rely on frontend visibility to protect administrative functions.
+
+## Data security
+
+- HTTPS for external communication.
+- Encryption at rest.
+- Encryption for sensitive fields where appropriate.
+- Secret management.
+- Strict environment separation.
+- Secure backup procedures.
+- Data minimization.
+- Secure retention and deletion policies.
+- Redaction of sensitive information in logs.
+
+Never commit secrets to Git.
+
+Never expose secrets in error messages.
+
+Do not log passwords, PINs, OTPs, access tokens, bank credentials or complete payment credentials.
+
+## API security
+
+Implement:
+
+- Input validation.
+- Output validation.
+- Rate limiting.
+- Request size limits.
+- Secure CORS configuration.
+- Authentication and authorization.
+- Replay protection where relevant.
+- Webhook signature validation.
+- Protection against injection.
+- Secure error handling.
+- Abuse monitoring.
+
+## Administrative security
+
+All administrator activities involving financial records or system configuration must be audited.
+
+Sensitive operations should require stronger authorization and, where appropriate, dual approval.
+
+Examples:
+
+- Manual financial adjustments.
+- Provider configuration changes.
+- Account restrictions.
+- High-risk transaction intervention.
+- Reconciliation adjustments.
+- Changes to transaction limits.
+
+An administrator must not be able to directly edit a customer's ledger balance.
+
+Any permitted adjustment must go through a dedicated, authorized accounting workflow.
+
+---
+
+# 13. WHATSAPP INTEGRATION
+
+Use Meta WhatsApp Business Platform Cloud API.
+
+Implement:
+
+- Webhook verification.
+- Incoming message handling.
+- Text processing.
+- Voice-note media retrieval.
+- Voice transcription.
+- Outgoing messages.
+- Delivery status updates.
+- Message deduplication.
+- WhatsApp identity mapping.
+- Template message support where required.
+- Error and retry handling.
+
+WhatsApp must be implemented as an adapter.
+
+The core financial application must not depend directly on WhatsApp-specific message structures.
+
+Create an internal messaging contract so other communication channels can be added later.
+
+Do not assume that WhatsApp messages provide sufficient transaction authorization.
+
+Use a separate secure authorization process suitable for the financial partner's approved requirements.
+
+Never store WhatsApp access tokens in application source code.
+
+---
+
+# 14. VOICE PROCESSING
+
+Support voice-note interaction.
+
+The voice-processing pipeline should:
+
+1. Receive the incoming media event.
+2. Verify that the event belongs to a valid WhatsApp identity.
+3. Retrieve media using authorized credentials.
+4. Validate the media type and size.
+5. Transcribe the audio.
+6. Process the transcript through the AI intent layer.
+7. Validate the resulting structured instruction.
+8. Continue through the normal application workflow.
+
+Do not let voice transcription bypass transaction validation or authorization.
+
+Treat transcription as potentially inaccurate.
+
+If the amount, recipient or destination is unclear, ask the customer to clarify.
+
+---
+
+# 15. TRANSACTION CONFIRMATION AND AUTHORIZATION
+
+A financial request must not be executed merely because the AI understands it.
+
+Before an operation is authorized, present an accurate summary containing:
+
+- Transaction type.
+- Recipient.
+- Destination bank and account name where applicable.
+- Amount.
+- Applicable fees.
+- Total amount.
+- Currency.
+
+The customer must explicitly authorize the exact transaction through an approved secure authentication mechanism.
+
+The authorization must be linked to the exact transaction details.
+
+If the customer changes the amount or recipient, invalidate the earlier authorization and request a new one.
+
+Implement expiration of pending authorization requests.
+
+Never interpret vague messages such as "okay" or unrelated conversation as authorization unless the message is unambiguously linked to a valid, active confirmation challenge.
+
+---
+
+# 16. ADMIN WEB DASHBOARD
+
+Build a professional, responsive administration interface.
+
+There must be administrator login only.
+
+No customer login or customer registration interface.
+
+## Dashboard overview
+
+Display:
+
+- Total registered customers.
+- Active customers.
+- Total transaction volume.
+- Total successful transactions.
+- Failed transactions.
+- Pending transactions.
+- Transactions requiring reconciliation.
+- Provider health.
+- Recent security events.
+- Recent administrative activity.
+
+All financial figures must come from authoritative backend queries.
+
+Do not hardcode dashboard metrics.
+
+## Customer management
+
+Administrators with appropriate permissions can:
+
+- View customers.
+- Search customers.
+- Review customer status.
+- View relevant transaction history.
+- Review verification status.
+- Apply permitted restrictions.
+- Review customer support cases.
+
+Mask sensitive data by default.
+
+## Transaction management
+
+Provide:
+
+- Transaction search.
+- Filtering by status.
+- Filtering by transaction type.
+- Filtering by date.
+- Filtering by customer.
+- Provider reference search.
+- Transaction detail pages.
+- Transaction event timeline.
+- Provider response history.
+- Reconciliation status.
+
+Administrators must not be given an unrestricted button to mark a transaction successful.
+
+Any retry, reversal or corrective action must follow a dedicated workflow.
+
+## Financial reconciliation
+
+Provide a reconciliation interface showing:
+
+- Internal transaction reference.
+- Provider transaction reference.
+- Internal amount.
+- Provider amount.
+- Internal status.
+- Provider status.
+- Difference.
+- Reconciliation status.
+- Resolution history.
+
+## Provider management
+
+Display provider connectivity and health.
+
+Allow only authorized administrators to manage approved configuration.
+
+Secrets must be stored in secure secret management infrastructure, not exposed in the dashboard.
+
+## Audit logs
+
+Provide searchable, filterable audit logs.
+
+Record:
+
+- Actor.
+- Action.
+- Resource.
+- Timestamp.
+- Relevant before-and-after values where safe.
+- Request or correlation ID.
+- Reason for sensitive actions.
+
+Audit logs must be protected against unauthorized modification.
+
+---
+
+# 17. FINANCIAL RECONCILIATION
+
+Reconciliation is mandatory.
+
+Do not assume that receiving a successful API response means all financial records are correct.
+
+Build scheduled and manually initiated reconciliation workflows.
+
+Compare:
+
+- Internal transactions.
+- Provider transactions.
+- Provider settlement reports.
+- Ledger journals.
+- Collection records.
+- Payout records.
+
+Identify:
+
+- Missing transactions.
+- Duplicate transactions.
+- Amount mismatches.
+- Status mismatches.
+- Missing ledger postings.
+- Unexplained settlement differences.
+
+Create reconciliation cases for unresolved discrepancies.
+
+Do not automatically correct unexplained differences by changing balances.
+
+Require controlled investigation and authorized resolution.
+
+---
+
+# 18. FAILURE HANDLING AND RECOVERY
+
+Design for real-world financial API failures.
+
+Consider:
+
+- Provider timeout.
+- Network failure.
+- Database failure.
+- Redis outage.
+- Worker crash.
+- Duplicate webhook.
+- Delayed webhook.
+- Provider downtime.
+- Inconsistent provider status.
+- Failed notification.
+- Duplicate customer request.
+- Process restart during a transaction.
+
+Implement appropriate retries, backoff, dead-letter queues and recovery jobs.
+
+Retries must respect idempotency.
+
+A timeout must not automatically trigger a second financial payout.
+
+Implement a transaction-status recovery process that queries the provider before considering another submission.
+
+Provide operators with visibility into transactions that require investigation.
+
+---
+
+# 19. OBSERVABILITY AND MONITORING
+
+Implement structured logs and correlation IDs.
+
+Every transaction should be traceable across:
+
+- Incoming WhatsApp message.
+- AI intent processing.
+- Authorization.
+- Transaction service.
+- Provider API request.
+- Webhook event.
+- Ledger posting.
+- Customer notification.
+
+Monitor:
+
+- API availability.
+- Provider response times.
+- Transaction success rates.
+- Failed jobs.
+- Webhook failures.
+- Reconciliation discrepancies.
+- Database performance.
+- Authentication anomalies.
+- Suspicious activity.
+
+Create alerts for critical financial inconsistencies.
+
+Never include sensitive authentication or payment data in telemetry.
+
+---
+
+# 20. TESTING REQUIREMENTS
+
+Testing is mandatory.
+
+Do not consider a financial module complete simply because its endpoint returns HTTP 200.
+
+## Unit tests
+
+Test:
+
+- Amount validation.
+- Fee calculations.
+- Recipient resolution.
+- Transaction state transitions.
+- Authorization expiration.
+- Ledger balancing.
+- Reversal calculations.
+- Idempotency.
+- Permission enforcement.
+
+## Integration tests
+
+Test:
+
+- Database transactions.
+- Provider adapters.
+- Webhook verification.
+- Webhook deduplication.
+- Redis jobs.
+- Outbox processing.
+- Authentication.
+- Administrative permissions.
+
+## Financial invariant tests
+
+Explicitly test:
+
+1. Every posted journal balances.
+2. A duplicate request cannot create a duplicate payout.
+3. Concurrent withdrawals cannot overdraw an available balance.
+4. A failed transaction cannot silently become successful.
+5. A timeout cannot cause an automatic duplicate payout.
+6. A posted ledger entry cannot be modified.
+7. Every reversal references its original transaction.
+8. A transaction cannot execute without valid authorization.
+9. A changed transaction requires new authorization.
+10. A provider webhook cannot be processed twice as two financial events.
+
+## End-to-end tests
+
+Build a complete sandbox scenario:
+
+Customer sends a WhatsApp message.
+
+The AI understands the request.
+
+The backend validates it.
+
+The customer authorizes the transaction.
+
+The transaction service calls the provider sandbox.
+
+The sandbox returns a simulated outcome.
+
+The application processes the event.
+
+The ledger records the appropriate simulated financial event.
+
+The customer receives the correct response.
+
+The administrator can inspect the complete transaction timeline.
+
+Also test failed, delayed, duplicated and uncertain provider responses.
+
+---
+
+# 21. REGULATORY AND OPERATIONAL BOUNDARIES
+
+This project is intended initially for development and sandbox testing.
+
+Do not independently assume that the platform can issue accounts, hold customer funds, operate a stored-value wallet or provide payment services without the appropriate regulatory permissions and licensed financial partner.
+
+Design the architecture to support a properly approved partner arrangement.
+
+Keep the following configurable and documented:
+
+- Customer verification requirements.
+- Transaction limits.
+- Financial partner responsibilities.
+- Account issuance model.
+- Custody and settlement model.
+- Transaction monitoring.
+- Dispute handling.
+- Reversals.
+- Data protection.
+- Record retention.
+- Regulatory reporting responsibilities.
+
+The system must be reviewed against applicable Nigerian financial regulation and data protection requirements by qualified professionals before live operation.
+
+Production mode must have explicit configuration gates and must not be enabled by a developer accidentally changing a single environment variable.
+
+---
+
+# 22. PROVIDER ABSTRACTION AND CONTRACTS
+
+Create formal internal contracts for every integration.
+
+For example:
+
+FinancialProvider
+- createVirtualAccount()
+- resolveAccount()
+- initiateTransfer()
+- verifyTransaction()
+- getTransactionStatus()
+- processRefund()
+- getSettlementRecords()
+
+MessagingProvider
+- sendTextMessage()
+- sendTemplateMessage()
+- retrieveMedia()
+- verifyWebhook()
+
+AIProvider
+- understandIntent()
+- transcribeAudio()
+- generateResponse()
+
+These are conceptual contracts. Define accurate TypeScript interfaces, input schemas, output schemas and error types.
+
+Implement sandbox adapters separately from production adapters.
+
+Never let sandbox code accidentally connect to production credentials.
+
+Document every provider's capabilities and limitations.
+
+---
+
+# 23. PROJECT STRUCTURE
+
+Organize the NestJS backend around business domains.
+
+A suggested starting structure:
+
+src/
+  main.ts
+  app.module.ts
+
+  common/
+    decorators/
+    guards/
+    interceptors/
+    filters/
+    pipes/
+    exceptions/
+    constants/
+    types/
+
+  config/
+    configuration/
+    validation/
+
+  infrastructure/
+    database/
+    redis/
+    queue/
+    logging/
+    encryption/
+    monitoring/
+
+  modules/
+    identity/
+    authentication/
+    customers/
+    administrators/
+    permissions/
+    recipients/
+    accounts/
+    conversations/
+    artificial-intelligence/
+    voice/
+    messaging/
+    transactions/
+    ledger/
+    financial-providers/
+    webhooks/
+    notifications/
+    reconciliation/
+    audit/
+    support/
+    reports/
+
+  contracts/
+    financial/
+    messaging/
+    ai/
+    events/
+
+  jobs/
+    processors/
+    schedulers/
+
+  tests/
+
+The final structure may be improved as implementation progresses, but domain boundaries must remain clear.
+
+Use modules, controllers, application services, domain logic, repositories, DTOs and tests where appropriate.
+
+Do not create empty abstractions without a real responsibility.
+
+---
+
+# 24. DEVELOPMENT ENVIRONMENTS
+
+Support three clearly separated environments:
+
+## Development
+
+- Local database.
+- Local Redis.
+- Mock provider where useful.
+- Test WhatsApp integration.
+- Test AI credentials.
+
+## Staging
+
+- Separate database.
+- Separate Redis.
+- WhatsApp test or approved staging configuration.
+- Financial provider sandbox.
+- Production-like security configuration.
+- Automated integration tests.
+
+## Production
+
+- Approved WhatsApp business integration.
+- Approved financial partner integration.
+- Secure production database.
+- Secure secret management.
+- Monitoring and alerting.
+- Backup and disaster recovery.
+- Operational controls.
+- Production access restrictions.
+
+Use environment validation at startup.
+
+The application must fail safely if required configuration is missing.
+
+Never silently fall back from production provider credentials to mock financial operations.
+
+Every simulated transaction must be clearly identifiable as simulated.
+
+---
+
+# 25. DOCUMENTATION DELIVERABLES
+
+Create and maintain:
+
+1. README.md
+2. SYSTEM_ARCHITECTURE.md
+3. DATABASE_SCHEMA.md
+4. API_CONTRACTS.md
+5. TRANSACTION_LIFECYCLE.md
+6. LEDGER_DESIGN.md
+7. SECURITY_ARCHITECTURE.md
+8. THREAT_MODEL.md
+9. WEBHOOK_PROCESSING.md
+10. RECONCILIATION.md
+11. PROVIDER_INTEGRATION.md
+12. ENVIRONMENT_SETUP.md
+13. DEPLOYMENT.md
+14. DISASTER_RECOVERY.md
+15. TESTING_STRATEGY.md
+16. ARCHITECTURAL_DECISIONS.md
+
+Document important assumptions and decisions.
+
+If a requirement cannot be implemented safely because information is missing, identify the missing requirement instead of inventing an implementation.
+
+---
+
+# 26. IMPLEMENTATION RULES
+
+These rules are mandatory.
+
+### Rule 1: Inspect before coding
+
+Inspect the existing repository before making changes.
+
+Identify:
+
+- Existing architecture.
+- Existing dependencies.
+- Existing modules.
+- Existing database schema.
+- Existing coding conventions.
+- Existing functionality.
+
+Do not destroy working functionality unnecessarily.
+
+### Rule 2: Design before implementation
+
+First establish:
+
+- System architecture.
+- Domain boundaries.
+- Database relationships.
+- Financial invariants.
+- Transaction state machines.
+- API contracts.
+- Security boundaries.
+- Integration contracts.
+
+### Rule 3: Never implement financial shortcuts
+
+Do not:
+
+- Store balances as the only financial record.
+- Use floating-point arithmetic for money.
+- Allow direct balance editing.
+- Trust AI-generated transaction instructions without validation.
+- Execute a payout without authorization.
+- Assume timeouts mean failure.
+- Ignore duplicate webhooks.
+- Allow arbitrary transaction state changes.
+- Retry payouts without checking their original status.
+- Use mutable ledger history.
+
+### Rule 4: Complete code, not disconnected snippets
+
+Implement complete, connected functionality.
+
+Do not provide isolated code fragments that cannot work within the project.
+
+For every feature, implement the required database changes, validation, service logic, API contracts, error handling and tests.
+
+### Rule 5: Explain important architectural decisions
+
+Document why a particular financial design was selected.
+
+Do not choose a complicated architecture without a clear reason.
+
+### Rule 6: Verify implementation
+
+Run the relevant tests and static checks.
+
+Do not claim a feature is complete if it has not been implemented and verified.
+
+### Rule 7: Do not invent provider capabilities
+
+Read actual provider documentation before implementing an integration.
+
+If a provider does not support a required operation, report the limitation.
+
+Do not fabricate endpoints, authentication mechanisms, webhook formats or API responses.
+
+### Rule 8: Preserve financial integrity
+
+All financial changes must be traceable.
+
+Every financial operation must have a clearly defined authorization, execution, recording, verification and recovery process.
+
+### Rule 9: Avoid premature microservices
+
+Begin with a modular monolith.
+
+Keep modules sufficiently independent for future extraction.
+
+### Rule 10: Security takes priority over convenience
+
+Never bypass a security control merely to make a demo easier.
+
+Use clearly isolated sandbox implementations when real infrastructure is unavailable.
+
+---
+
+# 27. REQUIRED INITIAL OUTPUT BEFORE CODING
+
+Before writing application code, produce the following:
+
+1. A complete system architecture.
+2. A domain module breakdown.
+3. A detailed database schema and entity relationships.
+4. The proposed double-entry ledger design.
+5. Transaction state machine.
+6. Transaction lifecycle sequence.
+7. Authentication and authorization design.
+8. Threat model.
+9. Provider integration contracts.
+10. WhatsApp integration architecture.
+11. API endpoint specification.
+12. Development and staging environment design.
+13. Testing strategy.
+14. Implementation roadmap with dependencies.
+
+Identify any missing business decisions that materially affect financial correctness.
+
+Do not quietly assume how customer funds are held, how balances are maintained or which party is responsible for settlement.
+
+After presenting the architecture, wait for approval before starting implementation.
+
+---
+
+# 28. FINAL QUALITY STANDARD
+
+The finished system must demonstrate:
+
+- Reliable financial transaction handling.
+- Double-entry accounting.
+- Strong idempotency.
+- Concurrency safety.
+- Secure authentication and authorization.
+- Immutable accounting records.
+- Reliable webhook processing.
+- Financial reconciliation.
+- Provider abstraction.
+- Traceable transaction lifecycles.
+- Recoverable background processing.
+- Comprehensive automated testing.
+- Secure administrator operations.
+- Reliable WhatsApp integration.
+- Validated AI instructions.
+- Clear separation between sandbox and production.
+
+The objective is to build a serious financial technology foundation, not merely an AI chatbot that calls payment APIs.
+
+Prioritize correctness, security, auditability and financial integrity over development speed.
+
+A system must not be described as banking-grade or production-ready merely because these components exist. Its security and financial controls must be independently reviewed, tested and validated before real customer funds are handled.

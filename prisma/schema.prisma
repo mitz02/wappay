@@ -1,0 +1,383 @@
+// Prisma Schema for WAPPay Banking Platform
+// Bank-grade financial ledger, transactional integrity, and identity management.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+// ENUMS
+// -----------------------------------------------------------------------------
+
+enum UserRole {
+  ADMIN
+  CUSTOMER
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  OPERATIONS_ADMIN
+  FINANCE_ADMIN
+  SUPPORT_ADMIN
+  AUDITOR
+}
+
+enum CustomerStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  RESTRICTED
+  CLOSED
+}
+
+enum KycTier {
+  TIER_1
+  TIER_2
+  TIER_3
+}
+
+enum TransactionType {
+  TRANSFER
+  DEPOSIT
+  WITHDRAWAL
+  AIRTIME_PURCHASE
+  DATA_PURCHASE
+  PAYMENT
+  REFUND
+  REVERSAL
+  FEE
+  ADJUSTMENT
+}
+
+enum TransactionState {
+  CREATED
+  VALIDATING
+  AWAITING_AUTHORIZATION
+  AUTHORIZED
+  PROCESSING
+  SUCCESSFUL
+  FAILED
+  PENDING
+  REQUIRES_RECONCILIATION
+  REVERSED
+  CANCELLED
+}
+
+enum LedgerAccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum EntryDirection {
+  DEBIT
+  CREDIT
+}
+
+enum JournalStatus {
+  POSTED
+  REVERSED
+}
+
+enum WebhookStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+  DEAD_LETTER
+}
+
+enum ReconciliationStatus {
+  IN_PROGRESS
+  MATCHED
+  DISCREPANCIES_FOUND
+  FAILED
+}
+
+// -----------------------------------------------------------------------------
+// IDENTITY & USERS
+// -----------------------------------------------------------------------------
+
+model User {
+  id           String    @id @default(uuid())
+  phoneNumber  String    @unique
+  email        String?   @unique
+  role         UserRole  @default(CUSTOMER)
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  customerProfile CustomerProfile?
+  adminProfile    AdminProfile?
+  auditLogs       AuditLog[]
+
+  @@map("users")
+}
+
+model AdminProfile {
+  id           String    @id @default(uuid())
+  userId       String    @unique
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  adminRole    AdminRole @default(SUPPORT_ADMIN)
+  passwordHash String
+  isMfaEnabled Boolean   @default(false)
+  mfaSecret    String?
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("admin_profiles")
+}
+
+model CustomerProfile {
+  id                 String         @id @default(uuid())
+  userId             String         @unique
+  user               User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName           String
+  whatsappNumber     String         @unique
+  status             CustomerStatus @default(PENDING_VERIFICATION)
+  kycTier            KycTier        @default(TIER_1)
+  pinHash            String?        // Argon2id hash of transaction PIN
+  failedPinAttempts  Int            @default(0)
+  pinLockedUntil     DateTime?
+  dailyLimitKobo     BigInt         @default(50000000) // Default 500,000 NGN in Kobo
+  accountReference   String?        @unique            // Dedicated virtual account number
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  recipients         Recipient[]
+  recipientAliases   RecipientAlias[]
+  transactions       Transaction[]
+  ledgerAccounts     LedgerAccount[]
+
+  @@index([status])
+  @@map("customer_profiles")
+}
+
+// -----------------------------------------------------------------------------
+// RECIPIENTS & ALIASES
+// -----------------------------------------------------------------------------
+
+model Recipient {
+  id            String   @id @default(uuid())
+  customerId    String
+  customer      CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  accountName   String
+  accountNumber String
+  bankCode      String
+  bankName      String
+  isVerified    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  aliases       RecipientAlias[]
+
+  @@unique([customerId, accountNumber, bankCode])
+  @@index([customerId])
+  @@map("recipients")
+}
+
+model RecipientAlias {
+  id          String   @id @default(uuid())
+  customerId  String
+  customer    CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  recipientId String
+  recipient   Recipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  alias       String   // e.g. "mum", "john", always lowercase
+  createdAt   DateTime @default(now())
+
+  @@unique([customerId, alias])
+  @@index([customerId, alias])
+  @@map("recipient_aliases")
+}
+
+// -----------------------------------------------------------------------------
+// DOUBLE-ENTRY ACCOUNTING LEDGER
+// -----------------------------------------------------------------------------
+
+model LedgerAccount {
+  id             String            @id @default(uuid())
+  accountNumber  String            @unique // e.g., "11100", "21000-CUST-123"
+  name           String
+  type           LedgerAccountType
+  currency       String            @default("NGN")
+  balanceKobo    BigInt            @default(0) // Materialized balance in Kobo
+  isSystemAccount Boolean          @default(false)
+  customerId     String?
+  customer       CustomerProfile?  @relation(fields: [customerId], references: [id])
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  entries        LedgerEntry[]
+
+  @@index([type])
+  @@index([customerId])
+  @@map("ledger_accounts")
+}
+
+model LedgerJournal {
+  id                 String        @id @default(uuid())
+  reference          String        @unique // Unique transaction journal reference
+  description        String
+  status             JournalStatus @default(POSTED)
+  idempotencyKey     String        @unique
+  postedAt           DateTime      @default(now())
+  reversalReference  String?       @unique // Points to original journal reference if this is a reversal
+  transactionId      String?
+  transaction        Transaction?  @relation(fields: [transactionId], references: [id])
+
+  entries            LedgerEntry[]
+
+  @@index([postedAt])
+  @@map("ledger_journals")
+}
+
+model LedgerEntry {
+  id               String         @id @default(uuid())
+  journalId        String
+  journal          LedgerJournal  @relation(fields: [journalId], references: [id], onDelete: Cascade)
+  accountId        String
+  account          LedgerAccount  @relation(fields: [accountId], references: [id])
+  direction        EntryDirection
+  amountKobo       BigInt         // Positive minor unit integer
+  balanceAfterKobo BigInt         // Snapshot of account balance immediately after posting
+  createdAt        DateTime       @default(now())
+
+  @@index([accountId])
+  @@index([journalId])
+  @@map("ledger_entries")
+}
+
+// -----------------------------------------------------------------------------
+// TRANSACTIONS & LIFECYCLE
+// -----------------------------------------------------------------------------
+
+model Transaction {
+  id                       String           @id @default(uuid())
+  internalReference        String           @unique
+  idempotencyKey           String           @unique
+  customerId               String
+  customer                 CustomerProfile  @relation(fields: [customerId], references: [id])
+  type                     TransactionType
+  state                    TransactionState @default(CREATED)
+  amountKobo               BigInt
+  feeKobo                  BigInt           @default(0)
+  currency                 String           @default("NGN")
+  providerReference        String?          @unique
+  destinationAccountNumber String?
+  destinationBankCode      String?
+  destinationAccountName   String?
+  recipientAlias           String?
+  isSimulated              Boolean          @default(true)
+  failureReason            String?
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+
+  events                   TransactionEvent[]
+  authorizations           TransactionAuthorization[]
+  journals                 LedgerJournal[]
+
+  @@index([customerId])
+  @@index([state])
+  @@index([createdAt])
+  @@map("transactions")
+}
+
+model TransactionEvent {
+  id            String           @id @default(uuid())
+  transactionId String
+  transaction   Transaction      @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  fromState     TransactionState
+  toState       TransactionState
+  reason        String?
+  metadata      String?          // JSON payload
+  createdAt     DateTime         @default(now())
+
+  @@index([transactionId])
+  @@map("transaction_events")
+}
+
+model TransactionAuthorization {
+  id             String      @id @default(uuid())
+  transactionId  String
+  transaction    Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  challengeToken String      @unique
+  expiresAt      DateTime
+  isUsed         Boolean     @default(false)
+  authorizedAt   DateTime?
+  failedAttempts Int         @default(0)
+  createdAt      DateTime    @default(now())
+
+  @@index([transactionId])
+  @@map("transaction_authorizations")
+}
+
+// -----------------------------------------------------------------------------
+// WEBHOOKS & INBOX
+// -----------------------------------------------------------------------------
+
+model WebhookInbox {
+  id           String        @id @default(uuid())
+  provider     String        // "meta", "paystack", "flutterwave", "sandbox"
+  eventType    String
+  eventId      String        @unique // External event ID for deduplication
+  payload      String        // Raw payload text for replay & verification
+  signature    String?
+  status       WebhookStatus @default(RECEIVED)
+  retryCount   Int           @default(0)
+  lastError    String?
+  receivedAt   DateTime      @default(now())
+  processedAt  DateTime?
+
+  @@index([provider, status])
+  @@map("webhook_inbox")
+}
+
+// -----------------------------------------------------------------------------
+// AUDIT & RECONCILIATION
+// -----------------------------------------------------------------------------
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actorType  String   // "ADMIN", "CUSTOMER", "SYSTEM"
+  action     String   // e.g. "CUSTOMER_SUSPENDED", "LEDGER_ADJUSTMENT"
+  resource   String   // e.g. "CustomerProfile", "LedgerJournal"
+  resourceId String?
+  beforeState String? // JSON snapshot
+  afterState  String? // JSON snapshot
+  ipAddress  String?
+  userAgent  String?
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  user       User?    @relation(fields: [actorId], references: [id])
+
+  @@index([resource, resourceId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model ReconciliationRun {
+  id                String               @id @default(uuid())
+  reference         String               @unique
+  provider          String
+  periodStart       DateTime
+  periodEnd         DateTime
+  totalTransactions Int                  @default(0)
+  totalAmountKobo   BigInt               @default(0)
+  status            ReconciliationStatus @default(IN_PROGRESS)
+  discrepancies     String?              // Detailed JSON log of mismatches
+  createdAt         DateTime             @default(now())
+  completedAt       DateTime?
+
+  @@index([provider, status])
+  @@map("reconciliation_runs")
+}

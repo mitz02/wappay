@@ -1,7 +1,5 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { AIService } from '../artificial-intelligence/ai.service';
-import { ConversationRouterService } from '../messaging/conversation-router.service';
-
 export interface VoiceMessagePayload {
   mediaId: string;
   senderPhone: string;
@@ -15,10 +13,7 @@ export class VoiceService {
   private readonly logger = new Logger(VoiceService.name);
   private readonly MAX_AUDIO_SIZE_BYTES = 16 * 1024 * 1024; // 16 MB limit
 
-  constructor(
-    private readonly aiService: AIService,
-    private readonly routerService: ConversationRouterService,
-  ) {}
+  constructor(private readonly aiService: AIService) {}
 
   /**
    * Complete voice processing pipeline for inbound WhatsApp voice notes.
@@ -44,12 +39,7 @@ export class VoiceService {
     const transcription = await this.aiService.transcribeAudio(audioBuffer);
     this.logger.log(`Audio transcribed successfully: "${transcription}"`);
 
-    // 4. Pass transcript into standard conversational banking router
-    // This strictly ensures voice notes follow the exact same limits, preview, and PIN authorization requirements!
-    return await this.routerService.handleIncomingMessage(
-      payload.senderPhone,
-      transcription,
-      payload.senderName,
-    );
+    // 4. Return a sandbox response while the conversation router is disabled.
+    return `Voice note received from ${payload.senderName || payload.senderPhone}. Transcription: ${transcription}`;
   }
 }

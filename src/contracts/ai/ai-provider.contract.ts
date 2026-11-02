@@ -17,6 +17,7 @@ export interface ParsedIntentProposal {
   recipientAlias?: string;
   phoneNumber?: string;
   network?: string;
+  bundle?: string;
   rawText: string;
   missingFields: string[];
 }

@@ -12,6 +12,7 @@ import { TransactionState } from '@prisma/client';
 export class ConversationRouterService {
   private readonly logger = new Logger(ConversationRouterService.name);
   private readonly conversationHistory = new Map<string, Array<{ role: 'user' | 'assistant'; content: string }>>();
+  private readonly pendingSimulations = new Map<string, { kind: 'airtime' | 'data' | 'withdrawal'; amountKobo?: bigint; bundle?: string }>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -109,9 +110,14 @@ export class ConversationRouterService {
     }
 
     if (lower === 'yes' || lower === 'confirm' || lower === 'confirm it' || lower === 'no' || lower === 'cancel') {
+      const pending = this.pendingSimulations.get(customer.id);
+      if (lower === 'no' || lower === 'cancel') this.pendingSimulations.delete(customer.id);
       const reply = lower === 'no' || lower === 'cancel'
         ? 'The pending financial operation was cancelled.'
-        : 'Confirmation received. For your security, reply with the 4-digit transaction PIN to authorize the pending transfer.';
+        : pending
+          ? `Simulation confirmed: ${pending.kind === 'data' ? `data bundle ${pending.bundle}` : `${pending.kind} for ${pending.amountKobo ? formatKoboToNaira(pending.amountKobo) : ''}`} completed successfully. No real-money transaction was performed.`
+          : 'There is no pending operation to confirm.';
+      if (lower === 'yes' || lower === 'confirm' || lower === 'confirm it') this.pendingSimulations.delete(customer.id);
       await this.messagingService.sendTextMessage(senderPhone, reply);
       history.push({ role: 'assistant', content: reply });
       return reply;
@@ -154,6 +160,30 @@ export class ConversationRouterService {
         );
 
         const reply = `📊 *Recent Transactions:*\n\n${lines.join('\n')}`;
+        await this.messagingService.sendTextMessage(senderPhone, reply);
+        return reply;
+      }
+
+      case FinancialIntent.BUY_AIRTIME:
+      case FinancialIntent.BUY_DATA:
+      case FinancialIntent.UNKNOWN: {
+        const isWithdrawal = lower.includes('withdraw') || lower.includes('cash out');
+        const amount = proposal.amountKobo;
+        const kind = isWithdrawal ? 'withdrawal' : proposal.intent === FinancialIntent.BUY_DATA ? 'data' : 'airtime';
+        if (proposal.intent === FinancialIntent.UNKNOWN && !isWithdrawal) {
+          const reply = 'I could not understand that request. Try checking your balance, listing recipients, sending money, buying airtime/data, or withdrawing cash.';
+          await this.messagingService.sendTextMessage(senderPhone, reply);
+          return reply;
+        }
+        if (kind !== 'data' && (!amount || amount <= 0n)) {
+          const reply = `Please provide a valid positive amount for ${kind}.`;
+          await this.messagingService.sendTextMessage(senderPhone, reply);
+          return reply;
+        }
+        this.pendingSimulations.set(customer.id, { kind, amountKobo: amount, bundle: proposal.bundle });
+        const reply = kind === 'data'
+          ? `Data purchase preview: ${proposal.bundle || 'the requested bundle'}. Reply "yes" to confirm.`
+          : `${kind[0].toUpperCase() + kind.slice(1)} preview: ${formatKoboToNaira(amount!)}. Reply "yes" to confirm.`;
         await this.messagingService.sendTextMessage(senderPhone, reply);
         return reply;
       }

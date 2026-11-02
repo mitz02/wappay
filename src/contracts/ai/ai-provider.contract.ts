@@ -6,6 +6,7 @@ export enum FinancialIntent {
   TRANSACTION_HISTORY = 'TRANSACTION_HISTORY',
   BUY_AIRTIME = 'BUY_AIRTIME',
   BUY_DATA = 'BUY_DATA',
+  WITHDRAW_CASH = 'WITHDRAW_CASH',
   HELP = 'HELP',
   UNKNOWN = 'UNKNOWN',
 }
@@ -17,6 +18,7 @@ export interface ParsedIntentProposal {
   recipientAlias?: string;
   phoneNumber?: string;
   network?: string;
+  bundle?: string;
   rawText: string;
   missingFields: string[];
 }

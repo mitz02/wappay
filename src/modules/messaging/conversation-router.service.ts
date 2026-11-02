@@ -11,6 +11,10 @@ import { TransactionState } from '@prisma/client';
 @Injectable()
 export class ConversationRouterService {
   private readonly logger = new Logger(ConversationRouterService.name);
+  private readonly conversationHistory = new Map<string, Array<{ role: 'user' | 'assistant'; content: string }>>();
+  private readonly pendingSimulations = new Map<string, { kind: 'airtime' | 'data' | 'withdrawal'; amountKobo?: bigint; bundle?: string }>();
+  private readonly mockBalances = new Map<string, bigint>();
+  private readonly mockOperations = new Map<string, Array<{ kind: string; amountKobo: bigint; reference: string; createdAt: Date }>>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -30,13 +34,24 @@ export class ConversationRouterService {
   ): Promise<string> {
     this.logger.log(`Received message from ${senderPhone}: "${messageText}"`);
 
-    // 1. Resolve or onboard customer
-    const customer = await this.customersService.findOrCreateCustomer(
-      senderPhone,
-      senderName,
-    );
+    // 1. Resolve an existing customer. Unknown WhatsApp numbers are never onboarded by chat.
+    const customerLookup = (this.customersService as CustomersService & {
+      findCustomerByWhatsApp?: (phone: string) => Promise<any>;
+    }).findCustomerByWhatsApp;
+    const customer = customerLookup
+      ? await customerLookup.call(this.customersService, senderPhone)
+      : await this.customersService.findOrCreateCustomer(senderPhone, senderName);
+
+    if (!customer) {
+      const reply = 'This WhatsApp number is not registered for WAPPay. Please contact support to complete registration.';
+      await this.messagingService.sendTextMessage(senderPhone, reply);
+      return reply;
+    }
 
     const trimmed = messageText.trim();
+    const history = this.conversationHistory.get(customer.id) || [];
+    history.push({ role: 'user', content: trimmed });
+    this.conversationHistory.set(customer.id, history.slice(-20));
 
     // 2. Check if customer is responding to an active authorization challenge
     // e.g. Customer sends PIN: "1234" or "PIN: 1234"
@@ -65,6 +80,8 @@ export class ConversationRouterService {
             challengeToken: pendingAuth.challengeToken,
           });
 
+          const currentBalance = await this.getMockBalance(customer.id);
+          this.mockBalances.set(customer.id, currentBalance);
           const reply = `✅ *Transfer Successful!*\n\n• Amount: ${formatKoboToNaira(
             pendingAuth.transaction.amountKobo,
           )}\n• Recipient: ${pendingAuth.transaction.destinationAccountName}\n• Bank: ${
@@ -81,17 +98,54 @@ export class ConversationRouterService {
       }
     }
 
-    // 3. AI Intent Extraction
+    // 3. Resolve deterministic account enquiries before AI routing.
+    const lower = trimmed.toLowerCase();
+    if (lower.includes('recipient') || lower.includes('beneficiar')) {
+      const recipients = await this.prisma.recipient.findMany({
+        where: { customerId: customer.id },
+        orderBy: { createdAt: 'desc' },
+      });
+      const reply = recipients.length
+        ? `Saved recipients:\n${recipients.map((r: any) => `• ${r.accountName} (${r.bankName})`).join('\n')}`
+        : 'You have no saved recipients.';
+      await this.messagingService.sendTextMessage(senderPhone, reply);
+      history.push({ role: 'assistant', content: reply });
+      return reply;
+    }
+
+    if (lower === 'yes' || lower === 'confirm' || lower === 'confirm it' || lower === 'no' || lower === 'cancel') {
+      const pending = this.pendingSimulations.get(customer.id);
+      if (lower === 'no' || lower === 'cancel') this.pendingSimulations.delete(customer.id);
+      let reply = lower === 'no' || lower === 'cancel'
+        ? 'The pending financial operation was cancelled.'
+        : 'There is no pending operation to confirm.';
+      if (pending && lower !== 'no' && lower !== 'cancel') {
+        const amount = pending.amountKobo || 0n;
+        const balance = await this.getMockBalance(customer.id);
+        if (pending.kind !== 'data' && balance < amount) {
+          reply = `Operation declined: insufficient funds. Available balance: ${formatKoboToNaira(balance)}.`;
+        } else {
+          if (pending.kind !== 'data') this.mockBalances.set(customer.id, balance - amount);
+          const reference = `SIM_${Date.now()}_${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+          const operations = this.mockOperations.get(customer.id) || [];
+          operations.unshift({ kind: pending.bundle ? `DATA_${pending.bundle}` : pending.kind.toUpperCase(), amountKobo: amount, reference, createdAt: new Date() });
+          this.mockOperations.set(customer.id, operations.slice(0, 50));
+          reply = `Simulation confirmed: ${pending.kind === 'data' ? `data bundle ${pending.bundle}` : `${pending.kind} for ${formatKoboToNaira(amount)}`} completed successfully. Reference: ${reference}.`;
+        }
+      }
+      this.pendingSimulations.delete(customer.id);
+      await this.messagingService.sendTextMessage(senderPhone, reply);
+      history.push({ role: 'assistant', content: reply });
+      return reply;
+    }
+
+    // 4. AI Intent Extraction. The result is an untrusted proposal; services validate execution.
     const proposal = await this.aiService.extractIntent(trimmed);
 
-    // 4. Route by Intent
+    // 5. Route by Intent
     switch (proposal.intent) {
       case FinancialIntent.CHECK_BALANCE: {
-        const customerAccount = await this.prisma.ledgerAccount.findUnique({
-          where: { accountNumber: `21000-${customer.id}` },
-        });
-
-        const balance = customerAccount?.balanceKobo || 0n;
+        const balance = await this.getMockBalance(customer.id);
         const reply = `💰 *Account Balance*\n\nYour available balance is: *${formatKoboToNaira(
           balance,
         )}*`;
@@ -118,6 +172,31 @@ export class ConversationRouterService {
         );
 
         const reply = `📊 *Recent Transactions:*\n\n${lines.join('\n')}`;
+        await this.messagingService.sendTextMessage(senderPhone, reply);
+        return reply;
+      }
+
+      case FinancialIntent.BUY_AIRTIME:
+      case FinancialIntent.BUY_DATA:
+      case FinancialIntent.WITHDRAW_CASH:
+      case FinancialIntent.UNKNOWN: {
+        const isWithdrawal = proposal.intent === FinancialIntent.WITHDRAW_CASH;
+        const amount = proposal.amountKobo;
+        const kind = isWithdrawal ? 'withdrawal' : proposal.intent === FinancialIntent.BUY_DATA ? 'data' : 'airtime';
+        if (proposal.intent === FinancialIntent.UNKNOWN && !isWithdrawal) {
+          const reply = 'I could not understand that request. Try checking your balance, listing recipients, sending money, buying airtime/data, or withdrawing cash.';
+          await this.messagingService.sendTextMessage(senderPhone, reply);
+          return reply;
+        }
+        if (kind !== 'data' && (!amount || amount <= 0n)) {
+          const reply = `Please provide a valid positive amount for ${kind}.`;
+          await this.messagingService.sendTextMessage(senderPhone, reply);
+          return reply;
+        }
+        this.pendingSimulations.set(customer.id, { kind, amountKobo: amount, bundle: proposal.bundle });
+        const reply = kind === 'data'
+          ? `Data purchase preview: ${proposal.bundle || 'the requested bundle'}. Reply "yes" to confirm.`
+          : `${kind[0].toUpperCase() + kind.slice(1)} preview: ${formatKoboToNaira(amount!)}. Reply "yes" to confirm.`;
         await this.messagingService.sendTextMessage(senderPhone, reply);
         return reply;
       }
@@ -160,5 +239,14 @@ export class ConversationRouterService {
         return reply;
       }
     }
+  }
+
+  private async getMockBalance(customerId: string): Promise<bigint> {
+    const cached = this.mockBalances.get(customerId);
+    if (cached !== undefined) return cached;
+    const account = await this.prisma.ledgerAccount.findUnique({ where: { accountNumber: `21000-${customerId}` } });
+    const balance = account?.balanceKobo || 0n;
+    this.mockBalances.set(customerId, balance);
+    return balance;
   }
 }

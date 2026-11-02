@@ -32,8 +32,8 @@ export class EnvironmentVariables {
   IS_SIMULATED: boolean = true;
 
   @IsString()
-  @IsNotEmpty()
-  DATABASE_URL!: string;
+  @IsOptional()
+  DATABASE_URL?: string;
 
   @IsString()
   @IsNotEmpty()
@@ -47,12 +47,12 @@ export class EnvironmentVariables {
   REDIS_PASSWORD?: string;
 
   @IsString()
-  @IsNotEmpty()
-  JWT_ACCESS_SECRET!: string;
+  @IsOptional()
+  JWT_ACCESS_SECRET?: string;
 
   @IsString()
-  @IsNotEmpty()
-  JWT_REFRESH_SECRET!: string;
+  @IsOptional()
+  JWT_REFRESH_SECRET?: string;
 
   @IsString()
   @IsNotEmpty()
@@ -80,7 +80,10 @@ export function validateEnvironment(config: Record<string, unknown>) {
     ...config,
     PORT: Number(config.PORT || 3000),
     REDIS_PORT: Number(config.REDIS_PORT || 6379),
-    IS_SIMULATED: config.IS_SIMULATED === 'true' || config.IS_SIMULATED === true,
+    IS_SIMULATED:
+      config.IS_SIMULATED === undefined
+        ? true
+        : config.IS_SIMULATED === 'true' || config.IS_SIMULATED === true,
   });
 
   const errors = validateSync(transformed, { skipMissingProperties: false });

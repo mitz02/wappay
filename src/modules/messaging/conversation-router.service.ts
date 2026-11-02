@@ -13,6 +13,8 @@ export class ConversationRouterService {
   private readonly logger = new Logger(ConversationRouterService.name);
   private readonly conversationHistory = new Map<string, Array<{ role: 'user' | 'assistant'; content: string }>>();
   private readonly pendingSimulations = new Map<string, { kind: 'airtime' | 'data' | 'withdrawal'; amountKobo?: bigint; bundle?: string }>();
+  private readonly mockBalances = new Map<string, bigint>();
+  private readonly mockOperations = new Map<string, Array<{ kind: string; amountKobo: bigint; reference: string; createdAt: Date }>>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -78,6 +80,8 @@ export class ConversationRouterService {
             challengeToken: pendingAuth.challengeToken,
           });
 
+          const currentBalance = await this.getMockBalance(customer.id);
+          this.mockBalances.set(customer.id, currentBalance);
           const reply = `✅ *Transfer Successful!*\n\n• Amount: ${formatKoboToNaira(
             pendingAuth.transaction.amountKobo,
           )}\n• Recipient: ${pendingAuth.transaction.destinationAccountName}\n• Bank: ${
@@ -112,12 +116,24 @@ export class ConversationRouterService {
     if (lower === 'yes' || lower === 'confirm' || lower === 'confirm it' || lower === 'no' || lower === 'cancel') {
       const pending = this.pendingSimulations.get(customer.id);
       if (lower === 'no' || lower === 'cancel') this.pendingSimulations.delete(customer.id);
-      const reply = lower === 'no' || lower === 'cancel'
+      let reply = lower === 'no' || lower === 'cancel'
         ? 'The pending financial operation was cancelled.'
-        : pending
-          ? `Simulation confirmed: ${pending.kind === 'data' ? `data bundle ${pending.bundle}` : `${pending.kind} for ${pending.amountKobo ? formatKoboToNaira(pending.amountKobo) : ''}`} completed successfully. No real-money transaction was performed.`
-          : 'There is no pending operation to confirm.';
-      if (lower === 'yes' || lower === 'confirm' || lower === 'confirm it') this.pendingSimulations.delete(customer.id);
+        : 'There is no pending operation to confirm.';
+      if (pending && lower !== 'no' && lower !== 'cancel') {
+        const amount = pending.amountKobo || 0n;
+        const balance = await this.getMockBalance(customer.id);
+        if (pending.kind !== 'data' && balance < amount) {
+          reply = `Operation declined: insufficient funds. Available balance: ${formatKoboToNaira(balance)}.`;
+        } else {
+          if (pending.kind !== 'data') this.mockBalances.set(customer.id, balance - amount);
+          const reference = `SIM_${Date.now()}_${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+          const operations = this.mockOperations.get(customer.id) || [];
+          operations.unshift({ kind: pending.bundle ? `DATA_${pending.bundle}` : pending.kind.toUpperCase(), amountKobo: amount, reference, createdAt: new Date() });
+          this.mockOperations.set(customer.id, operations.slice(0, 50));
+          reply = `Simulation confirmed: ${pending.kind === 'data' ? `data bundle ${pending.bundle}` : `${pending.kind} for ${formatKoboToNaira(amount)}`} completed successfully. Reference: ${reference}.`;
+        }
+      }
+      this.pendingSimulations.delete(customer.id);
       await this.messagingService.sendTextMessage(senderPhone, reply);
       history.push({ role: 'assistant', content: reply });
       return reply;
@@ -129,11 +145,7 @@ export class ConversationRouterService {
     // 5. Route by Intent
     switch (proposal.intent) {
       case FinancialIntent.CHECK_BALANCE: {
-        const customerAccount = await this.prisma.ledgerAccount.findUnique({
-          where: { accountNumber: `21000-${customer.id}` },
-        });
-
-        const balance = customerAccount?.balanceKobo || 0n;
+        const balance = await this.getMockBalance(customer.id);
         const reply = `💰 *Account Balance*\n\nYour available balance is: *${formatKoboToNaira(
           balance,
         )}*`;
@@ -166,8 +178,9 @@ export class ConversationRouterService {
 
       case FinancialIntent.BUY_AIRTIME:
       case FinancialIntent.BUY_DATA:
+      case FinancialIntent.WITHDRAW_CASH:
       case FinancialIntent.UNKNOWN: {
-        const isWithdrawal = lower.includes('withdraw') || lower.includes('cash out');
+        const isWithdrawal = proposal.intent === FinancialIntent.WITHDRAW_CASH;
         const amount = proposal.amountKobo;
         const kind = isWithdrawal ? 'withdrawal' : proposal.intent === FinancialIntent.BUY_DATA ? 'data' : 'airtime';
         if (proposal.intent === FinancialIntent.UNKNOWN && !isWithdrawal) {
@@ -226,5 +239,14 @@ export class ConversationRouterService {
         return reply;
       }
     }
+  }
+
+  private async getMockBalance(customerId: string): Promise<bigint> {
+    const cached = this.mockBalances.get(customerId);
+    if (cached !== undefined) return cached;
+    const account = await this.prisma.ledgerAccount.findUnique({ where: { accountNumber: `21000-${customerId}` } });
+    const balance = account?.balanceKobo || 0n;
+    this.mockBalances.set(customerId, balance);
+    return balance;
   }
 }

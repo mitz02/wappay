@@ -73,7 +73,7 @@ export class AIService implements IAIProvider {
     // 5. Cash withdrawal
     if (lower.includes('withdraw') || lower.includes('cash out')) {
       const amount = this.extractMonetaryAmount(raw);
-      return { intent: FinancialIntent.UNKNOWN, confidence: 0.9, amountKobo: amount, rawText: raw, missingFields: amount ? [] : ['amount'] };
+      return { intent: FinancialIntent.WITHDRAW_CASH, confidence: 0.9, amountKobo: amount, rawText: raw, missingFields: amount ? [] : ['amount'] };
     }
 
     // 6. Fund transfers
@@ -142,7 +142,7 @@ export class AIService implements IAIProvider {
           temperature: 0,
           response_format: { type: 'json_object' },
           messages: [
-            { role: 'system', content: `Return JSON only: {"intent":"TRANSFER|CHECK_BALANCE|TRANSACTION_HISTORY|BUY_AIRTIME|BUY_DATA|HELP|UNKNOWN","amountNaira":number|null,"recipientAlias":string|null,"bundle":string|null,"missingFields":string[]}. Never execute transactions or invent balances.` },
+            { role: 'system', content: `Return JSON only: {"intent":"TRANSFER|CHECK_BALANCE|TRANSACTION_HISTORY|BUY_AIRTIME|BUY_DATA|WITHDRAW_CASH|HELP|UNKNOWN","amountNaira":number|null,"recipientAlias":string|null,"bundle":string|null,"missingFields":string[]}. Never execute transactions or invent balances.` },
             { role: 'user', content: text },
           ],
         }),

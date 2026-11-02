@@ -11,6 +11,7 @@ import { TransactionState } from '@prisma/client';
 @Injectable()
 export class ConversationRouterService {
   private readonly logger = new Logger(ConversationRouterService.name);
+  private readonly conversationHistory = new Map<string, Array<{ role: 'user' | 'assistant'; content: string }>>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -30,13 +31,24 @@ export class ConversationRouterService {
   ): Promise<string> {
     this.logger.log(`Received message from ${senderPhone}: "${messageText}"`);
 
-    // 1. Resolve or onboard customer
-    const customer = await this.customersService.findOrCreateCustomer(
-      senderPhone,
-      senderName,
-    );
+    // 1. Resolve an existing customer. Unknown WhatsApp numbers are never onboarded by chat.
+    const customerLookup = (this.customersService as CustomersService & {
+      findCustomerByWhatsApp?: (phone: string) => Promise<any>;
+    }).findCustomerByWhatsApp;
+    const customer = customerLookup
+      ? await customerLookup.call(this.customersService, senderPhone)
+      : await this.customersService.findOrCreateCustomer(senderPhone, senderName);
+
+    if (!customer) {
+      const reply = 'This WhatsApp number is not registered for WAPPay. Please contact support to complete registration.';
+      await this.messagingService.sendTextMessage(senderPhone, reply);
+      return reply;
+    }
 
     const trimmed = messageText.trim();
+    const history = this.conversationHistory.get(customer.id) || [];
+    history.push({ role: 'user', content: trimmed });
+    this.conversationHistory.set(customer.id, history.slice(-20));
 
     // 2. Check if customer is responding to an active authorization challenge
     // e.g. Customer sends PIN: "1234" or "PIN: 1234"
@@ -81,10 +93,34 @@ export class ConversationRouterService {
       }
     }
 
-    // 3. AI Intent Extraction
+    // 3. Resolve deterministic account enquiries before AI routing.
+    const lower = trimmed.toLowerCase();
+    if (lower.includes('recipient') || lower.includes('beneficiar')) {
+      const recipients = await this.prisma.recipient.findMany({
+        where: { customerId: customer.id },
+        orderBy: { createdAt: 'desc' },
+      });
+      const reply = recipients.length
+        ? `Saved recipients:\n${recipients.map((r: any) => `• ${r.accountName} (${r.bankName})`).join('\n')}`
+        : 'You have no saved recipients.';
+      await this.messagingService.sendTextMessage(senderPhone, reply);
+      history.push({ role: 'assistant', content: reply });
+      return reply;
+    }
+
+    if (lower === 'yes' || lower === 'confirm' || lower === 'confirm it' || lower === 'no' || lower === 'cancel') {
+      const reply = lower === 'no' || lower === 'cancel'
+        ? 'The pending financial operation was cancelled.'
+        : 'Confirmation received. For your security, reply with the 4-digit transaction PIN to authorize the pending transfer.';
+      await this.messagingService.sendTextMessage(senderPhone, reply);
+      history.push({ role: 'assistant', content: reply });
+      return reply;
+    }
+
+    // 4. AI Intent Extraction. The result is an untrusted proposal; services validate execution.
     const proposal = await this.aiService.extractIntent(trimmed);
 
-    // 4. Route by Intent
+    // 5. Route by Intent
     switch (proposal.intent) {
       case FinancialIntent.CHECK_BALANCE: {
         const customerAccount = await this.prisma.ledgerAccount.findUnique({

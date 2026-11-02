@@ -9,6 +9,15 @@ export class CustomersService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Finds a registered customer without onboarding unknown WhatsApp numbers. */
+  async findCustomerByWhatsApp(whatsappNumber: string) {
+    const cleanNumber = whatsappNumber.replace(/[^0-9+]/g, '');
+    return this.prisma.customerProfile.findUnique({
+      where: { whatsappNumber: cleanNumber },
+      include: { user: true, recipients: true },
+    });
+  }
+
   /**
    * Finds or registers a customer by WhatsApp phone number.
    */

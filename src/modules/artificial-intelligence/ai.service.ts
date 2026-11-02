@@ -15,12 +15,8 @@ export class AIService implements IAIProvider {
     const raw = text.trim();
     const lower = raw.toLowerCase();
 
-    // 1. Balance Queries
-    if (
-      lower.includes('balance') ||
-      lower.includes('how much') ||
-      lower.includes('account balance')
-    ) {
+    // 1. Balance and account queries
+    if (lower.includes('balance') || lower.includes('how much') || lower.includes('account balance')) {
       return {
         intent: FinancialIntent.CHECK_BALANCE,
         confidence: 0.98,
@@ -29,13 +25,16 @@ export class AIService implements IAIProvider {
       };
     }
 
+    if (lower.includes('account details') || lower.includes('account information')) {
+      return { intent: FinancialIntent.CHECK_BALANCE, confidence: 0.96, rawText: raw, missingFields: [] };
+    }
+
+    if (lower.includes('recipient') || lower.includes('beneficiar')) {
+      return { intent: FinancialIntent.HELP, confidence: 0.94, rawText: raw, missingFields: [] };
+    }
+
     // 2. Transaction History Queries
-    if (
-      lower.includes('history') ||
-      lower.includes('statement') ||
-      lower.includes('last transactions') ||
-      lower.includes('recent')
-    ) {
+    if (lower.includes('history') || lower.includes('statement') || lower.includes('last transaction') || lower.includes('recent')) {
       return {
         intent: FinancialIntent.TRANSACTION_HISTORY,
         confidence: 0.95,
@@ -91,8 +90,8 @@ export class AIService implements IAIProvider {
       };
     }
 
-    // 5. Help Queries
-    if (lower === 'help' || lower === 'hi' || lower === 'hello' || lower === 'start') {
+    // 5. Help and general conversation
+    if (lower === 'help' || lower === 'hi' || lower === 'hello' || lower === 'start' || lower.includes('what can you do') || lower.includes('how does this service work')) {
       return {
         intent: FinancialIntent.HELP,
         confidence: 0.99,

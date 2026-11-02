@@ -124,3 +124,4 @@ The test suite validates:
 - **Strict State Transitions:** Prohibition of direct `CREATED` $\rightarrow$ `SUCCESSFUL` or `SUCCESSFUL` $\rightarrow$ `FAILED` transitions.
 - **Idempotency Replay Safety:** Repeated execution requests return the existing journal without double-posting.
 - **Conversational Entity Parsing:** Clean extraction of amounts, NGN multipliers (e.g., `5k`), and recipient aliases.
+"# wappay" 

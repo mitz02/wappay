@@ -258,9 +258,10 @@ describe('[Integration] Financial Simulations', () => {
   it('purchases ₦1,000 airtime successfully', async () => {
     const { assistant } = buildServiceGraph();
 
-    const reply = await assistant.processCustomerMessage('2348012345678', 'Buy ₦1,000 airtime');
+    // One-shot airtime with explicit network and amount executes directly
+    const reply = await assistant.processCustomerMessage('2348012345678', 'Recharge MTN 1000 airtime');
 
-    expect(reply).toContain('Simulated Airtime Top-Up Successful!');
+    expect(reply).toContain('AIRTIME TOP-UP SUCCESSFUL!');
     expect(reply).toContain('₦1,000.00');
     expect(reply).toContain('MTN');
     expect(reply).toMatch(/MOCK_AIR_/);
@@ -466,9 +467,9 @@ describe('[Integration] Error Handling', () => {
 
     const reply = await assistant.processCustomerMessage('2349000000000', "What's my balance?");
 
-    // Auto-provisioned with ₦0 balance
+    // Auto-provisioned mock customers start with the configured starter balance
     expect(reply).toContain('Account Balance (Simulated)');
-    expect(reply).toContain('₦0.00');
+    expect(reply).toContain('₦250,000.00');
   });
 
   // --- 5f. Airtime without amount ---

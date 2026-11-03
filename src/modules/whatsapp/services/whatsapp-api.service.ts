@@ -26,6 +26,158 @@ export class WhatsAppApiService {
    * @param text - Plaintext message content.
    * @param replyToMessageId - Optional WhatsApp message ID if this is an in-thread reply.
    */
+  /**
+   * Dispatches an interactive button message to the Meta WhatsApp Cloud API.
+   * Maximum 3 buttons per Meta WhatsApp specification.
+   */
+  async sendInteractiveButtons(
+    to: string,
+    bodyText: string,
+    buttons: Array<{ id: string; title: string }>,
+    headerText?: string,
+    footerText = 'WAPPay Instant Banking',
+    replyToMessageId?: string,
+  ): Promise<WhatsAppApiResponse> {
+    const cleanTo = to.replace(/[^0-9]/g, '');
+    const actionButtons = buttons.slice(0, 3).map((b) => ({
+      type: 'reply',
+      reply: {
+        id: b.id,
+        title: b.title.slice(0, 20),
+      },
+    }));
+
+    const payload: any = {
+      messaging_product: WHATSAPP_CONFIG.MESSAGING_PRODUCT,
+      recipient_type: WHATSAPP_CONFIG.RECIPIENT_TYPE_INDIVIDUAL,
+      to: cleanTo,
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: bodyText },
+        footer: { text: footerText },
+        action: { buttons: actionButtons },
+      },
+    };
+
+    if (headerText) {
+      payload.interactive.header = { type: 'text', text: headerText };
+    }
+    if (replyToMessageId) {
+      payload.context = { message_id: replyToMessageId };
+    }
+
+    return await this.dispatchPayload(cleanTo, payload);
+  }
+
+  /**
+   * Dispatches an interactive list message to the Meta WhatsApp Cloud API.
+   * Supports up to 10 rows across sections.
+   */
+  async sendInteractiveList(
+    to: string,
+    bodyText: string,
+    buttonText: string,
+    sections: Array<{
+      title: string;
+      rows: Array<{ id: string; title: string; description?: string }>;
+    }>,
+    headerText?: string,
+    footerText = 'WAPPay Instant Banking',
+    replyToMessageId?: string,
+  ): Promise<WhatsAppApiResponse> {
+    const cleanTo = to.replace(/[^0-9]/g, '');
+
+    const payload: any = {
+      messaging_product: WHATSAPP_CONFIG.MESSAGING_PRODUCT,
+      recipient_type: WHATSAPP_CONFIG.RECIPIENT_TYPE_INDIVIDUAL,
+      to: cleanTo,
+      type: 'interactive',
+      interactive: {
+        type: 'list',
+        body: { text: bodyText },
+        footer: { text: footerText },
+        action: {
+          button: buttonText.slice(0, 20),
+          sections: sections.map((s) => ({
+            title: s.title.slice(0, 24),
+            rows: s.rows.map((r) => ({
+              id: r.id,
+              title: r.title.slice(0, 24),
+              description: r.description ? r.description.slice(0, 72) : undefined,
+            })),
+          })),
+        },
+      },
+    };
+
+    if (headerText) {
+      payload.interactive.header = { type: 'text', text: headerText };
+    }
+    if (replyToMessageId) {
+      payload.context = { message_id: replyToMessageId };
+    }
+
+    return await this.dispatchPayload(cleanTo, payload);
+  }
+
+  /**
+   * Internal helper to dispatch any prepared payload to Meta Cloud API.
+   */
+  private async dispatchPayload(cleanTo: string, payload: any): Promise<WhatsAppApiResponse> {
+    const accessToken = this.configService.get<string>('whatsapp.accessToken');
+    const phoneNumberId = this.configService.get<string>('whatsapp.phoneNumberId');
+    const apiUrl = this.configService.get<string>('whatsapp.apiUrl') || WHATSAPP_CONFIG.DEFAULT_GRAPH_API_BASE;
+    const timeoutMs = this.configService.get<number>('whatsapp.apiTimeoutMs') || WHATSAPP_CONFIG.DEFAULT_TIMEOUT_MS;
+    const isSimulated = this.configService.get<boolean>('isSimulated');
+
+    if (!accessToken || !phoneNumberId) {
+      throw new InternalServerErrorException('WhatsApp API configuration is incomplete.');
+    }
+
+    const maskedTo = cleanTo.length > 6 ? (cleanTo.slice(0, 3) + '***' + cleanTo.slice(-3)) : '***';
+    const url = apiUrl + '/' + phoneNumberId + '/messages';
+
+    if (isSimulated && accessToken.startsWith('mock_')) {
+      this.logger.log('[SIMULATED] Simulated interactive message delivered to ' + maskedTo);
+      return {
+        messaging_product: 'whatsapp',
+        contacts: [{ input: cleanTo, wa_id: cleanTo }],
+        messages: [{ id: 'wamid.SIMULATED_' + Date.now() }],
+      };
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer ' + accessToken,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+      const responseBody: any = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        const errorDetails = responseBody?.error?.message || response.statusText;
+        this.logger.warn('Meta API interactive dispatch error: ' + errorDetails);
+        throw new BadRequestException('Meta WhatsApp API error: ' + errorDetails);
+      }
+
+      return responseBody as WhatsAppApiResponse;
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      throw err;
+    }
+  }
+
   async sendTextMessage(
     to: string,
     text: string,

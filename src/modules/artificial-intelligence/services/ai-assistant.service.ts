@@ -12,6 +12,7 @@ import { formatKoboToNaira } from '../../../common/types';
 @Injectable()
 export class AIAssistantService {
   private readonly logger = new Logger(AIAssistantService.name);
+  private readonly pendingAirtimeSessions = new Map<string, { network?: string; amountKobo?: bigint; targetPhone?: string; stage: 'SELECT_NETWORK' | 'SELECT_AMOUNT' }>();
 
   constructor(
     @Inject('CHAT_PROVIDER') private readonly chatProvider: IChatProvider,
@@ -45,7 +46,57 @@ export class AIAssistantService {
       contactName,
     );
 
-    // 2. Parse Structured Intent & Entities
+    // 2. Check for active multi-step Airtime Wizard session
+    const lowerInput = trimmedMessage.toLowerCase();
+    const airtimeSession = this.pendingAirtimeSessions.get(customer.id);
+
+    if (airtimeSession) {
+      if (
+        lowerInput === 'cancel' ||
+        lowerInput === 'abort' ||
+        lowerInput === 'stop' ||
+        lowerInput === 'no'
+      ) {
+        this.pendingAirtimeSessions.delete(customer.id);
+        return '❌ *Airtime Purchase Cancelled*\n\nNo funds were debited from your account. What else would you like to do?';
+      }
+
+      if (airtimeSession.stage === 'SELECT_NETWORK') {
+        const selectedNet = this.resolveNetworkChoice(trimmedMessage);
+        if (selectedNet) {
+          airtimeSession.network = selectedNet;
+          airtimeSession.stage = 'SELECT_AMOUNT';
+          this.pendingAirtimeSessions.set(customer.id, airtimeSession);
+          return this.buildFancyAmountMenu(selectedNet, airtimeSession.targetPhone || normalizedPhone);
+        }
+      } else if (airtimeSession.stage === 'SELECT_AMOUNT') {
+        const selectedAmount = this.resolveAmountChoice(trimmedMessage);
+        if (selectedAmount && selectedAmount > 0n) {
+          this.pendingAirtimeSessions.delete(customer.id);
+          const network = airtimeSession.network || 'MTN';
+          const targetPhone = airtimeSession.targetPhone || normalizedPhone;
+          try {
+            const airtimeResult = await this.mockFinancialService.simulateAirtimePurchase(
+              customer.id,
+              targetPhone,
+              network,
+              selectedAmount,
+            );
+            return this.buildFancyAirtimeReceipt(airtimeResult);
+          } catch (err: any) {
+            return (
+              '╔═══════════════════════════════════════╗\n' +
+              '║         ⚠️ AIRTIME PURCHASE FAILED    ║\n' +
+              '╚═══════════════════════════════════════╝\n\n' +
+              err.message + '\n\n' +
+              '💡 *Tip:* To add funds to your wallet, reply:\n👉 _"Deposit ₦50,000"_'
+            );
+          }
+        }
+      }
+    }
+
+    // 3. Parse Structured Intent & Entities
     const parsed = await this.intentParser.parseIntent(trimmedMessage);
     this.logger.log(
       `[AI Intent] Customer: ${customer.fullName} (${normalizedPhone}) | Intent: ${parsed.intent}`,
@@ -227,29 +278,38 @@ export class AIAssistantService {
 
         // --- H. Airtime Purchase ---
         case MockFinancialIntent.AIRTIME_PURCHASE: {
-          if (!parsed.amountKobo) {
-            reply =
-              `📱 *Airtime Purchase*\n\n` +
-              `Please specify the recharge amount.\n` +
-              `Example: _"Buy ₦1,000 MTN airtime"_`;
+          const targetPhone = this.extractBeneficiaryPhone(trimmedMessage) || normalizedPhone;
+
+          // If both network and amount are known: execute immediately
+          if (parsed.network && parsed.amountKobo && parsed.amountKobo > 0n) {
+            const airtimeResult = await this.mockFinancialService.simulateAirtimePurchase(
+              customer.id,
+              targetPhone,
+              parsed.network,
+              parsed.amountKobo,
+            );
+            reply = this.buildFancyAirtimeReceipt(airtimeResult);
             break;
           }
 
-          const airtimeResult = await this.mockFinancialService.simulateAirtimePurchase(
-            customer.id,
-            normalizedPhone,
-            parsed.network || 'MTN',
-            parsed.amountKobo,
-          );
+          // If network is known but amount is missing: show amount menu
+          if (parsed.network) {
+            this.pendingAirtimeSessions.set(customer.id, {
+              network: parsed.network,
+              targetPhone,
+              stage: 'SELECT_AMOUNT',
+            });
+            reply = this.buildFancyAmountMenu(parsed.network, targetPhone);
+            break;
+          }
 
-          reply =
-            `📱 *Simulated Airtime Top-Up Successful!*\n\n` +
-            `• *Network:* ${airtimeResult.network}\n` +
-            `• *Beneficiary Phone:* ${airtimeResult.beneficiaryPhone}\n` +
-            `• *Package:* ${airtimeResult.packageDetails}\n` +
-            `• *Amount Debited:* *${formatKoboToNaira(airtimeResult.amountDebitedKobo)}*\n` +
-            `• *New Balance:* *${formatKoboToNaira(airtimeResult.newBalanceKobo)}*\n` +
-            `• *Ref:* \`${airtimeResult.reference}\``;
+          // If neither or only amount is known: start at network selection
+          this.pendingAirtimeSessions.set(customer.id, {
+            amountKobo: parsed.amountKobo,
+            targetPhone,
+            stage: 'SELECT_NETWORK',
+          });
+          reply = this.buildFancyNetworkMenu(targetPhone);
           break;
         }
 
@@ -359,5 +419,124 @@ export class AIAssistantService {
         `• _"Who are my saved recipients?"_`
       );
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Fancy Airtime Formatting & Helpers
+  // ---------------------------------------------------------------------------
+
+  private buildFancyNetworkMenu(phone: string): string {
+    return (
+      `╔═══════════════════════════════════════╗\n` +
+      `║         📱 SELECT MOBILE NETWORK      ║\n` +
+      `╚═══════════════════════════════════════╝\n\n` +
+      `⚡ *Instant Mobile Airtime Top-Up*\n` +
+      `🎁 *Bonus:* Get *3% instant cashback* on every recharge!\n` +
+      `📞 *Beneficiary Line:* \`${phone}\`\n\n` +
+      `Please choose your mobile network:\n\n` +
+      `┌───────────────────────────────────────┐\n` +
+      `│  [1] 🟡 *MTN*      (Instant 4G/5G)    │\n` +
+      `├───────────────────────────────────────┤\n` +
+      `│  [2] 🔴 *Airtel*   (Smart Recharge)   │\n` +
+      `├───────────────────────────────────────┤\n` +
+      `│  [3] 🟢 *Glo*      (Unlimited Talk)   │\n` +
+      `├───────────────────────────────────────┤\n` +
+      `│  [4] 🟢 *9mobile*  (Super Fast)       │\n` +
+      `└───────────────────────────────────────┘\n\n` +
+      `👉 *Reply with 1-4 or network name (e.g. "MTN")*\n` +
+      `_Type "cancel" at any time to exit._`
+    );
+  }
+
+  private buildFancyAmountMenu(network: string, phone: string): string {
+    const netIcon =
+      network === 'MTN' ? '🟡' : network === 'AIRTEL' ? '🔴' : network === 'GLO' ? '🟢' : '🟢';
+
+    return (
+      `╔═══════════════════════════════════════╗\n` +
+      `║       ⚡ SELECT AIRTIME AMOUNT        ║\n` +
+      `╚═══════════════════════════════════════╝\n\n` +
+      `${netIcon} *Network:* *${network} Nigeria*\n` +
+      `📱 *Recipient:* \`${phone}\`\n\n` +
+      `Choose an airtime package (button format):\n\n` +
+      `┌───────────────────────────────────────┐\n` +
+      `│  [1] 🔘  *₦500*   Airtime (Save ₦15)  │\n` +
+      `├───────────────────────────────────────┤\n` +
+      `│  [2] 🔘  *₦1,000* Airtime (Save ₦30)  │\n` +
+      `├───────────────────────────────────────┤\n` +
+      `│  [3] 🔘  *₦2,000* Airtime (Save ₦60)  │\n` +
+      `├───────────────────────────────────────┤\n` +
+      `│  [4] 🔘  *₦5,000* Airtime (Save ₦150) │\n` +
+      `└───────────────────────────────────────┘\n\n` +
+      `👉 *Reply with 1-4, amount (e.g. "1000"), or type any custom amount*\n` +
+      `_Type "cancel" to exit._`
+    );
+  }
+
+  private buildFancyAirtimeReceipt(result: any): string {
+    const netIcon =
+      result.network === 'MTN'
+        ? '🟡'
+        : result.network === 'AIRTEL'
+        ? '🔴'
+        : result.network === 'GLO'
+        ? '🟢'
+        : '🟢';
+    const cashbackKobo = (result.amountDebitedKobo * 3n) / 100n;
+
+    return (
+      `╔═══════════════════════════════════════╗\n` +
+      `║     🎉 AIRTIME TOP-UP SUCCESSFUL!     ║\n` +
+      `╚═══════════════════════════════════════╝\n\n` +
+      `✅ *Your mobile line has been credited instantly!*\n\n` +
+      `📋 *Transaction Receipt:*\n` +
+      `• 📶 *Network:* ${netIcon} *${result.network} Nigeria*\n` +
+      `• 📱 *Recipient Line:* \`${result.beneficiaryPhone}\`\n` +
+      `• 📦 *Package:* ${result.packageDetails}\n` +
+      `• 💸 *Amount Debited:* *${formatKoboToNaira(result.amountDebitedKobo)}*\n` +
+      `• 🎁 *Cashback Earned:* *${formatKoboToNaira(cashbackKobo)} (3% instant savings)*\n` +
+      `• 🔖 *Ref ID:* \`${result.reference}\`\n\n` +
+      `💳 *New Available Balance:* *${formatKoboToNaira(result.newBalanceKobo)}*\n` +
+      `═══════════════════════════════════════\n` +
+      `_Thank you for choosing WAPPay Instant Banking!_`
+    );
+  }
+
+  private resolveNetworkChoice(input: string): string | undefined {
+    const raw = input.trim().toLowerCase();
+    if (raw === '1' || raw.includes('mtn') || raw.includes('yellow') || raw === 'net_mtn') return 'MTN';
+    if (raw === '2' || raw.includes('airtel') || raw.includes('red') || raw === 'net_airtel') return 'AIRTEL';
+    if (raw === '3' || raw.includes('glo') || raw.includes('globacom') || raw === 'net_glo') return 'GLO';
+    if (raw === '4' || raw.includes('9mobile') || raw.includes('etisalat') || raw === 'net_9mobile') return '9MOBILE';
+    return undefined;
+  }
+
+  private resolveAmountChoice(input: string): bigint | undefined {
+    const raw = input.trim().toLowerCase().replace(/,/g, '');
+    if (raw === '1' || raw === 'amt_500' || raw === '500' || raw === '₦500') return 50_000n;
+    if (raw === '2' || raw === 'amt_1000' || raw === '1000' || raw === '1k' || raw === '₦1000' || raw === '₦1,000') return 100_000n;
+    if (raw === '3' || raw === 'amt_2000' || raw === '2000' || raw === '2k' || raw === '₦2000' || raw === '₦2,000') return 200_000n;
+    if (raw === '4' || raw === 'amt_5000' || raw === '5000' || raw === '5k' || raw === '₦5000' || raw === '₦5,000') return 500_000n;
+
+    const cleanNum = raw.replace(/[^0-9.]/g, '');
+    if (cleanNum && !isNaN(Number(cleanNum))) {
+      const naira = parseFloat(cleanNum);
+      if (naira > 0) {
+        return BigInt(Math.round(naira * 100));
+      }
+    }
+    return undefined;
+  }
+
+  private extractBeneficiaryPhone(text: string): string | undefined {
+    const match = text.match(/\b(0[789][01]\d{8}|234[789][01]\d{8})\b/);
+    if (match) {
+      const digits = match[1];
+      if (digits.startsWith('0')) {
+        return `234${digits.slice(1)}`;
+      }
+      return digits;
+    }
+    return undefined;
   }
 }

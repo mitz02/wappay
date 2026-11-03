@@ -275,7 +275,7 @@ describe('AIAssistantService', () => {
       'MTN',
       100_000n,
     );
-    expect(reply).toContain('Simulated Airtime Top-Up Successful!');
+    expect(reply).toContain('AIRTIME TOP-UP SUCCESSFUL!');
   });
 
   it('executes a data bundle purchase simulation', async () => {

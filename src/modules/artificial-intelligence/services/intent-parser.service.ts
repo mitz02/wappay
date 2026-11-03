@@ -162,14 +162,30 @@ export class IntentParserService {
     }
 
     // 8. Airtime Purchase
-    if (lower.includes('airtime') || lower.includes('recharge phone') || lower.includes('buy credit')) {
+    if (
+      lower.includes('airtime') ||
+      lower.includes('recharge phone') ||
+      lower.includes('buy credit') ||
+      lower === 'recharge' ||
+      lower.startsWith('recharge ') ||
+      lower === 'airtime' ||
+      lower.startsWith('buy airtime') ||
+      lower === 'top up' ||
+      lower.startsWith('top up phone') ||
+      lower.startsWith('top up airtime') ||
+      lower === 'credit'
+    ) {
       const amountKobo = this.extractMonetaryAmount(raw);
       const network = this.extractNetwork(raw);
+      // Default to MTN when an amount is present but no network is specified.
+      // When no amount is provided (bare "buy airtime"), leave network undefined so
+      // the interactive wizard starts at network selection.
+      const resolvedNetwork = network || (amountKobo ? 'MTN' : undefined);
       return {
         intent: MockFinancialIntent.AIRTIME_PURCHASE,
         confidence: 0.94,
         amountKobo,
-        network: network || 'MTN',
+        network: resolvedNetwork,
         rawText: raw,
       };
     }

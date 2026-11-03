@@ -39,6 +39,7 @@ describe('MockFinancialService', () => {
           balanceKobo: 250_000_00n, // ₦250,000.00
         }),
         upsert: jest.fn().mockResolvedValue({ id: 'acc-001' }),
+        create: jest.fn().mockResolvedValue({ id: 'acc-new' }),
       },
       transaction: {
         findFirst: jest.fn(),
@@ -105,11 +106,14 @@ describe('MockFinancialService', () => {
       const newCust = { ...mockCustomer, id: 'cust-new', whatsappNumber: '2348099999999' };
       mockPrisma.customerProfile.create.mockResolvedValueOnce(newCust);
 
+      // ensureCustomerAccount uses ledgerAccount.findUnique + create (not upsert)
+      mockPrisma.ledgerAccount.findUnique.mockResolvedValueOnce(null); // no pre-existing account
+
       const customer = await service.resolveMockCustomer('2348099999999', 'New Tester');
       expect(mockPrisma.customerProfile.create).toHaveBeenCalled();
-      expect(mockPrisma.ledgerAccount.upsert).toHaveBeenCalledWith(
+      expect(mockPrisma.ledgerAccount.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { accountNumber: '21000-cust-new' },
+          data: expect.objectContaining({ accountNumber: '21000-cust-new' }),
         }),
       );
     });
@@ -213,7 +217,7 @@ describe('MockFinancialService', () => {
           { id: 'auth-1', isUsed: false, expiresAt: new Date(Date.now() + 60000) },
         ],
       };
-      mockPrisma.transaction.findFirst.mockResolvedValueOnce(pendingTxn);
+      mockPrisma.transaction.findMany.mockResolvedValueOnce([pendingTxn]);
 
       const result = await service.confirmTransfer('cust-001', 'YES');
 
@@ -239,7 +243,7 @@ describe('MockFinancialService', () => {
           { id: 'auth-1', isUsed: false, expiresAt: new Date(Date.now() - 60000) }, // Expired
         ],
       };
-      mockPrisma.transaction.findFirst.mockResolvedValueOnce(expiredTxn);
+      mockPrisma.transaction.findMany.mockResolvedValueOnce([expiredTxn]);
 
       await expect(service.confirmTransfer('cust-001', 'YES')).rejects.toThrow(
         UnauthorizedTransactionException,

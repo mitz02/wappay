@@ -23,6 +23,53 @@ export class WhatsAppMessageService {
    * Normalizes an incoming phone number into standard international format without '+' or formatting symbols.
    * Example: "+234 801-234-5678" -> "2348012345678"
    */
+  /**
+   * Sends an interactive button reply message.
+   */
+  async sendInteractiveButtons(
+    to: string,
+    bodyText: string,
+    buttons: Array<{ id: string; title: string }>,
+    headerText?: string,
+    footerText?: string,
+    replyToMessageId?: string,
+  ): Promise<WhatsAppApiResponse> {
+    return await this.apiService.sendInteractiveButtons(
+      to,
+      bodyText,
+      buttons,
+      headerText,
+      footerText,
+      replyToMessageId,
+    );
+  }
+
+  /**
+   * Sends an interactive list reply message.
+   */
+  async sendInteractiveList(
+    to: string,
+    bodyText: string,
+    buttonText: string,
+    sections: Array<{
+      title: string;
+      rows: Array<{ id: string; title: string; description?: string }>;
+    }>,
+    headerText?: string,
+    footerText?: string,
+    replyToMessageId?: string,
+  ): Promise<WhatsAppApiResponse> {
+    return await this.apiService.sendInteractiveList(
+      to,
+      bodyText,
+      buttonText,
+      sections,
+      headerText,
+      footerText,
+      replyToMessageId,
+    );
+  }
+
   normalizePhoneNumber(phoneNumber: string): string {
     const digitsOnly = phoneNumber.replace(/[^0-9]/g, '');
 

@@ -94,8 +94,24 @@ export class IncomingMessageHandler {
       return replyText;
     }
 
-    // 3. Handle Other Unsupported Message Types Gracefully (image, sticker, document, etc.)
-    if (message.type !== WHATSAPP_MESSAGE_TYPES.TEXT) {
+    // 3. Extract text from Text or Interactive messages
+    let textBody = '';
+
+    if (message.type === WHATSAPP_MESSAGE_TYPES.TEXT) {
+      textBody = message.text?.body?.trim() || '';
+    } else if (
+      message.type === WHATSAPP_MESSAGE_TYPES.INTERACTIVE ||
+      message.type === 'interactive'
+    ) {
+      const interactive = (message as any).interactive;
+      textBody =
+        interactive?.button_reply?.title ||
+        interactive?.button_reply?.id ||
+        interactive?.list_reply?.title ||
+        interactive?.list_reply?.id ||
+        '';
+      this.logger.log(`Received interactive button/list selection from ${maskedPhone}: "${textBody}"`);
+    } else {
       this.logger.log(
         `Received non-text message type "${message.type}" from ${maskedPhone}. Sending unsupported type notice.`,
       );
@@ -107,8 +123,7 @@ export class IncomingMessageHandler {
       return WHATSAPP_TEST_RESPONSES.UNSUPPORTED_TYPE_REPLY;
     }
 
-    // 4. Process Text Message via AI Assistant Service (Groq AI)
-    const textBody = message.text?.body?.trim() || '';
+    // 4. Process Message via AI Assistant Service (Groq AI)
 
     this.logger.log(
       `Routing inbound message from ${maskedPhone} to Groq AI Assistant: "${textBody}"`,
@@ -127,8 +142,58 @@ export class IncomingMessageHandler {
       replyText = WHATSAPP_TEST_RESPONSES.DEFAULT_WELCOME_REPLY;
     }
 
-    // 5. Dispatch Reply via WhatsApp Cloud API
-    await this.messageService.sendReply(normalizedPhone, replyText, message.id);
+    // 5. Dispatch Reply via WhatsApp Cloud API (With interactive buttons/list when applicable)
+    try {
+      if (replyText.includes('SELECT MOBILE NETWORK')) {
+        await this.messageService.sendInteractiveList(
+          normalizedPhone,
+          '⚡ *Instant Airtime Recharge*\nPlease choose your mobile network provider below:',
+          'Select Network',
+          [
+            {
+              title: 'Mobile Networks',
+              rows: [
+                { id: 'MTN', title: '🟡 MTN Nigeria', description: 'Instant 4G/5G • 3% Cashback' },
+                { id: 'AIRTEL', title: '🔴 Airtel Nigeria', description: 'Smart Recharge • 3% Cashback' },
+                { id: 'GLO', title: '🟢 Glo Nigeria', description: 'Unlimited Berekete • 3% Cashback' },
+                { id: '9MOBILE', title: '🟢 9mobile', description: 'Super Fast • 3% Cashback' },
+              ],
+            },
+          ],
+          '📱 Airtime Top-Up',
+          'WAPPay Instant Banking',
+          message.id,
+        ).catch(async () => {
+          await this.messageService.sendReply(normalizedPhone, replyText, message.id);
+        });
+      } else if (replyText.includes('SELECT AIRTIME AMOUNT')) {
+        await this.messageService.sendInteractiveList(
+          normalizedPhone,
+          'Choose an airtime recharge package below (or reply with a custom amount):',
+          'Select Package',
+          [
+            {
+              title: 'Popular Airtime Packages',
+              rows: [
+                { id: '500', title: '₦500 Airtime', description: 'Pay ₦485 (Save ₦15)' },
+                { id: '1000', title: '₦1,000 Airtime', description: 'Pay ₦970 (Save ₦30)' },
+                { id: '2000', title: '₦2,000 Airtime', description: 'Pay ₦1,940 (Save ₦60)' },
+                { id: '5000', title: '₦5,000 Airtime', description: 'Pay ₦4,850 (Save ₦150)' },
+              ],
+            },
+          ],
+          '⚡ Select Package',
+          'WAPPay Instant Banking',
+          message.id,
+        ).catch(async () => {
+          await this.messageService.sendReply(normalizedPhone, replyText, message.id);
+        });
+      } else {
+        await this.messageService.sendReply(normalizedPhone, replyText, message.id);
+      }
+    } catch {
+      await this.messageService.sendReply(normalizedPhone, replyText, message.id);
+    }
 
     return replyText;
   }

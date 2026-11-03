@@ -15,7 +15,6 @@ async function createHandler() {
   server.get('/', (_req, res) => res.redirect('/docs'));
 
   const app = await NestFactory.create(AppModule, new ExpressAdapter(server), {
-    bufferLogs: true,
     rawBody: true,
   });
   const configService = app.get(ConfigService);

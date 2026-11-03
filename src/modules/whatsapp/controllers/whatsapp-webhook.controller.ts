@@ -17,7 +17,6 @@ import { Request } from 'express';
 import { WhatsAppSignatureService } from '../services/whatsapp-signature.service';
 import { WhatsAppWebhookService } from '../services/whatsapp-webhook.service';
 import { WhatsAppWebhookPayload } from '../interfaces/whatsapp-message.interface';
-import { WhatsAppWebhookVerificationDto } from '../dto/whatsapp-webhook.dto';
 
 /**
  * WhatsAppWebhookController
@@ -60,18 +59,28 @@ export class WhatsAppWebhookController {
    */
   @Get()
   @Header('Content-Type', 'text/plain; charset=utf-8')
-  verifyWebhook(@Query() query: WhatsAppWebhookVerificationDto): string {
-    const { 'hub.mode': mode, 'hub.verify_token': token, 'hub.challenge': challenge } = query;
+  verifyWebhook(@Query() query: Record<string, string | string[] | undefined>): string {
+    const readParam = (value: string | string[] | undefined): string | undefined =>
+      Array.isArray(value) ? value[0] : value;
+    const normalizeToken = (value: string | undefined): string =>
+      (value ?? '').trim().replace(/^["']|["']$/g, '');
 
-    const configuredToken = this.configService.get<string>('whatsapp.verifyToken');
+    const mode = readParam(query['hub.mode']);
+    const token = readParam(query['hub.verify_token']);
+    const challenge = readParam(query['hub.challenge']);
+    const configuredToken = normalizeToken(
+      this.configService.get<string>('whatsapp.verifyToken'),
+    );
 
     if (!mode || !token || !challenge) {
-      this.logger.warn('Webhook verification rejected: Missing required query parameters.');
+      this.logger.warn(
+        `Webhook verification rejected: missing params (mode=${Boolean(mode)}, token=${Boolean(token)}, challenge=${Boolean(challenge)}).`,
+      );
       throw new ForbiddenException('Missing webhook verification parameters.');
     }
 
     if (mode !== 'subscribe') {
-      this.logger.warn(`Webhook verification rejected: Unsupported mode "${mode}".`);
+      this.logger.warn(`Webhook verification rejected: unsupported mode "${mode}".`);
       throw new ForbiddenException('Unsupported webhook verification mode.');
     }
 
@@ -80,12 +89,12 @@ export class WhatsAppWebhookController {
       throw new ForbiddenException('Webhook verification is not configured.');
     }
 
-    // Constant-time comparison is not strictly required here (no secret revealed on mismatch),
-    // but we avoid early-exit for consistency and to prevent timing-based enumeration.
-    const isValid = token === configuredToken;
+    const providedToken = normalizeToken(token);
 
-    if (!isValid) {
-      this.logger.warn('Webhook verification rejected: Token mismatch.');
+    if (providedToken !== configuredToken) {
+      this.logger.warn(
+        `Webhook verification rejected: token mismatch (providedLength=${providedToken.length}, configuredLength=${configuredToken.length}).`,
+      );
       throw new ForbiddenException('Invalid webhook verification token.');
     }
 

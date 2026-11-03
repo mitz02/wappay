@@ -10,24 +10,40 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly configService: ConfigService) {}
 
   onModuleInit() {
+    // Support full Redis URL (e.g. Upstash on Vercel) or host/port/password individually
+    const redisUrl = process.env.REDIS_URL;
     const host = this.configService.get<string>('redis.host') || 'localhost';
     const port = this.configService.get<number>('redis.port') || 6379;
     const password = this.configService.get<string>('redis.password');
 
     try {
-      this.client = new Redis({
-        host,
-        port,
-        password: password || undefined,
-        lazyConnect: true,
-        maxRetriesPerRequest: 1,
-        retryStrategy: () => null, // Do not spam reconnect logs if local redis is offline during tests
+      this.client = redisUrl
+        ? new Redis(redisUrl, {
+            lazyConnect: true,
+            maxRetriesPerRequest: 1,
+            retryStrategy: () => null,
+          })
+        : new Redis({
+            host,
+            port,
+            password: password || undefined,
+            lazyConnect: true,
+            maxRetriesPerRequest: 1,
+            retryStrategy: () => null, // Do not spam reconnect logs if local redis is offline during tests
+          });
+
+      // Attach error listener BEFORE connect() to prevent "Unhandled error event"
+      // in serverless environments (Vercel) where no Redis is available locally.
+      this.client.on('error', (err) => {
+        this.logger.warn(`Redis connection error: ${err.message}. Operating in degraded/sync mode.`);
       });
 
       this.client.connect().then(() => {
-        this.logger.log(`Connected to Redis at ${host}:${port}`);
+        const target = redisUrl ? '(via REDIS_URL)' : `${host}:${port}`;
+        this.logger.log(`Connected to Redis ${target}`);
       }).catch((err) => {
-        this.logger.warn(`Redis server not available at ${host}:${port} (${err.message}). Queue workers will operate in degraded/sync mode.`);
+        const target = redisUrl ? '(via REDIS_URL)' : `${host}:${port}`;
+        this.logger.warn(`Redis server not available at ${target} (${err.message}). Queue workers will operate in degraded/sync mode.`);
       });
     } catch (err: any) {
       this.logger.warn(`Redis init error: ${err.message}`);

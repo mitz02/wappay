@@ -1,9 +1,9 @@
 // AI Module Constants and Guardrail Prompts
 
 export const AI_CONSTANTS = {
-  DEFAULT_GROQ_MODEL: 'llama-3.3-70b-versatile',
+  DEFAULT_GROQ_MODEL: 'openai/gpt-oss-120b',
   DEFAULT_TEMPERATURE: 0.3,
-  DEFAULT_MAX_TOKENS: 512,
+  DEFAULT_MAX_TOKENS: 1024,
   DEFAULT_TIMEOUT_MS: 15000,
   MAX_HISTORY_MESSAGES: 10,
 } as const;

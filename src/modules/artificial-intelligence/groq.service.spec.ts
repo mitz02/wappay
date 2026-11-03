@@ -11,7 +11,7 @@ import { ChatMessage } from '../../contracts/ai/ai-provider.contract';
 function makeService(configOverrides: Record<string, unknown> = {}) {
   const defaults: Record<string, unknown> = {
     'groq.apiKey': 'mock_test_key',
-    'groq.model': 'llama-3.3-70b-versatile',
+        'groq.model': 'openai/gpt-oss-120b',
     isSimulated: true,
     ...configOverrides,
   };
@@ -82,7 +82,7 @@ describe('GroqService', () => {
       service = makeService({
         isSimulated: false,
         'groq.apiKey': 'gsk_valid_live_key_12345678',
-        'groq.model': 'llama-3.3-70b-versatile',
+    'groq.model': 'openai/gpt-oss-120b',
       });
 
       mockCreate = jest.fn();
@@ -114,7 +114,7 @@ describe('GroqService', () => {
       expect(result).toBe('WAPPay allows you to transfer money securely over WhatsApp.');
       expect(mockCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          model: 'llama-3.3-70b-versatile',
+          model: 'openai/gpt-oss-120b',
           messages: expect.any(Array),
         }),
       );

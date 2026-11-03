@@ -4,6 +4,7 @@ import {
   Post,
   Query,
   Headers,
+  Header,
   Body,
   Req,
   HttpCode,
@@ -58,6 +59,7 @@ export class WhatsAppWebhookController {
    * @see https://developers.facebook.com/docs/graph-api/webhooks/getting-started
    */
   @Get()
+  @Header('Content-Type', 'text/plain; charset=utf-8')
   verifyWebhook(@Query() query: WhatsAppWebhookVerificationDto): string {
     const { 'hub.mode': mode, 'hub.verify_token': token, 'hub.challenge': challenge } = query;
 

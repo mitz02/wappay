@@ -11,6 +11,7 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "seed": "ts-node prisma/seed.ts",
+    "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },

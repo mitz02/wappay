@@ -21,6 +21,7 @@ export interface ParsedFinancialIntent {
   confidence: number;
   amountKobo?: bigint;
   recipient?: string;
+  transfers?: Array<{ amountKobo: bigint; recipient: string }>;
   network?: string;
   plan?: string;
   limit?: number;
@@ -197,6 +198,42 @@ export class IntentParserService {
     //   "Send 5000 naira to Mum"  → amount=5000 NGN, recipient="Mum"
     //   "Transfer 10k to John"    → amount=10,000 NGN, recipient="John"
     //   "Send ₦2,500 to Jane"     → amount=₦2,500, recipient="Jane"
+    // Multi-transfer check: e.g. "send 1000 to mum and 500 to sister"
+    const transferClauses = raw.split(/\s*(?:and|&|,|\+)\s+/i);
+    if (transferClauses.length > 1) {
+      const parsedTransfers: Array<{ amountKobo: bigint; recipient: string }> = [];
+      for (const clause of transferClauses) {
+        const m = clause.match(/(?:(?:send|transfer|pay)\s+)?(?:(?:ngn|₦)\s*)?([0-9kK,.]+)\s*(?:naira\s*)?(?:to\s+)([a-zA-Z0-9_]+)/i);
+        if (m) {
+          const aStr = m[1].replace(/,/g, '');
+          let kobo: bigint | undefined;
+          try {
+            if (aStr.toLowerCase().endsWith('k')) {
+              kobo = parseNairaToKobo(parseFloat(aStr.slice(0, -1)) * 1000);
+            } else {
+              kobo = parseNairaToKobo(aStr);
+            }
+          } catch {
+            kobo = undefined;
+          }
+          if (kobo && kobo > 0n) {
+            parsedTransfers.push({ amountKobo: kobo, recipient: m[2].trim() });
+          }
+        }
+      }
+
+      if (parsedTransfers.length > 1) {
+        return {
+          intent: MockFinancialIntent.TRANSFER,
+          confidence: 0.98,
+          transfers: parsedTransfers,
+          amountKobo: parsedTransfers[0].amountKobo,
+          recipient: parsedTransfers[0].recipient,
+          rawText: raw,
+        };
+      }
+    }
+
     const transferRegex =
       /(?:send|transfer|pay)\s+(?:(?:ngn|₦)\s*)?([0-9kK,.]+)\s+(?:naira\s+)?(?:to\s+)?([a-zA-Z0-9_\s]+)/i;
     const transferMatch = raw.match(transferRegex);

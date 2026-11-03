@@ -121,11 +121,41 @@ export class AIAssistantService {
 
         // --- E. Fund Transfer Intent ---
         case MockFinancialIntent.TRANSFER: {
+          // Multi-transfer batch handling
+          if (parsed.transfers && parsed.transfers.length > 1) {
+            const batchPreview = await this.mockFinancialService.createBatchTransferPreview(
+              customer.id,
+              parsed.transfers,
+            );
+
+            const lines = batchPreview.previews.map(
+              (p, idx) =>
+                `${idx + 1}. *Recipient:* *${p.recipientName}*\n` +
+                `   • Account: \`${p.recipientAccountNumber}\` (${p.recipientBankName})\n` +
+                `   • Amount: *${formatKoboToNaira(p.amountKobo)}*\n` +
+                `   • Fee: *${formatKoboToNaira(p.feeKobo)}*`
+            );
+
+            reply =
+              `📋 *Multiple Transfers Confirmation*` +
+              `\n\n${lines.join('\n\n')}\n\n` +
+              `💰 *Batch Total:*\n` +
+              `• Transfers: *${formatKoboToNaira(batchPreview.totalAmountKobo)}*\n` +
+              `• Total Fees: *${formatKoboToNaira(batchPreview.totalFeeKobo)}*\n` +
+              `• Total Debit: *${formatKoboToNaira(batchPreview.totalDebitKobo)}*\n\n` +
+              `_Reply *YES* to confirm all ${batchPreview.previews.length} transfers or *CANCEL* to abort (valid for ${batchPreview.expiresInMinutes} minutes)._`;
+            break;
+          }
           if (!parsed.amountKobo || !parsed.recipient) {
             reply =
               `⚠️ *Missing Transfer Details*\n\n` +
               `Please specify both the amount and recipient name.\n` +
-              `Example: _"Send ₦5,000 to Mum"_ or _"Transfer 10k to John"_`;
+              `Example: _"Send ₦5,000 to Chioma"_ or _"Transfer 10k to Adebayo"_\n\n` +
+              `👥 *Registered Users You Can Send To:*\n` +
+              `• *Adebayo Ogunlesi* (Acc: \`0123456789\`)\n` +
+              `• *Chioma Okonkwo* (Acc: \`0234567890\`)\n` +
+              `• *Babatunde Adeleke* (Acc: \`0345678901\`)\n` +
+              `• Or saved aliases: *Mum*, *Sister*, *Landlord*, *John*`;
             break;
           }
 

@@ -52,7 +52,7 @@ export class VoiceService {
     }
 
     const mime = (payload.mimeType || 'audio/ogg').toLowerCase();
-    const isSupported = this.SUPPORTED_MIME_TYPES.some((m) => mime.includes(m));
+    const isSupported = this.SUPPORTED_MIME_TYPES.some((m) => mime.includes(m)) || mime.startsWith('audio/');
     if (!isSupported) {
       throw new BadRequestException(
         `Unsupported audio format: "${payload.mimeType}". Supported formats include OGG, MP3, WAV, AMR, and MP4.`,

@@ -209,6 +209,239 @@ export class MockFinancialService {
   /**
    * Phase 1: Validates transfer parameters, resolves recipient, and issues confirmation challenge.
    */
+  /**
+   * Resolves recipient across personal saved contacts, registered system users, and seeded aliases.
+   */
+  async resolveDestinationRecipient(
+    senderCustomerId: string,
+    query: string,
+  ): Promise<{
+    accountNumber: string;
+    accountName: string;
+    bankCode: string;
+    bankName: string;
+    alias: string;
+    internalCustomerId?: string;
+  }> {
+    const raw = query.trim();
+    const cleanLower = raw.toLowerCase();
+    const cleanDigits = raw.replace(/[^0-9]/g, '');
+
+    // 1. Check sender's personal saved recipients via RecipientsService
+    try {
+      const resolved = await this.recipientsService.resolveRecipient(senderCustomerId, raw);
+      if (resolved) {
+        return {
+          accountNumber: resolved.accountNumber,
+          accountName: resolved.accountName,
+          bankCode: resolved.bankCode,
+          bankName: resolved.bankName,
+          alias: raw,
+        };
+      }
+    } catch {
+      // Continue to next resolution strategy
+    }
+
+    // 2. Search other registered mock customers in CustomerProfile
+    // By account reference or phone (exact digits match)
+    if (cleanDigits.length >= 7) {
+      const matchedByNumber = await this.prisma.customerProfile.findFirst({
+        where: {
+          OR: [
+            { accountReference: cleanDigits },
+            { whatsappNumber: cleanDigits },
+          ],
+        },
+      });
+      if (matchedByNumber && matchedByNumber.id !== senderCustomerId) {
+        return {
+          accountNumber: matchedByNumber.accountReference || `01${matchedByNumber.whatsappNumber.slice(-8)}`,
+          accountName: matchedByNumber.fullName,
+          bankCode: MOCK_FINANCIAL_CONSTANTS.SIMULATED_BANK_CODE,
+          bankName: MOCK_FINANCIAL_CONSTANTS.SIMULATED_BANK_NAME,
+          alias: matchedByNumber.fullName,
+          internalCustomerId: matchedByNumber.id,
+        };
+      }
+    }
+
+    // By Name match in CustomerProfile
+    const allCustomers = await this.prisma.customerProfile.findMany();
+    const otherCustomers = allCustomers.filter((c) => c.id !== senderCustomerId);
+
+    // Common nickname mappings
+    const nicknameMap: Record<string, string> = {
+      bayo: 'adebayo',
+      ade: 'adebayo',
+      tunde: 'babatunde',
+      baba: 'babatunde',
+      chi: 'chioma',
+      oma: 'chioma',
+    };
+    const targetName = nicknameMap[cleanLower] || cleanLower;
+
+    const matchedByName = otherCustomers.find((c) =>
+      c.fullName.toLowerCase().includes(targetName) ||
+      (c.accountReference && c.accountReference === cleanDigits),
+    );
+
+    if (matchedByName) {
+      return {
+        accountNumber: matchedByName.accountReference || `01${matchedByName.whatsappNumber.slice(-8)}`,
+        accountName: matchedByName.fullName,
+        bankCode: MOCK_FINANCIAL_CONSTANTS.SIMULATED_BANK_CODE,
+        bankName: MOCK_FINANCIAL_CONSTANTS.SIMULATED_BANK_NAME,
+        alias: matchedByName.fullName,
+        internalCustomerId: matchedByName.id,
+      };
+    }
+
+    // 3. Known friendly relation aliases (Mum, Sister, Landlord, John, Wife, Brother)
+    const seededAliases: Record<string, { name: string; account: string; bankCode: string; bankName: string }> = {
+      mum: { name: 'Jane Adeleke', account: '0111222333', bankCode: '058', bankName: 'Guaranty Trust Bank' },
+      mom: { name: 'Jane Adeleke', account: '0111222333', bankCode: '058', bankName: 'Guaranty Trust Bank' },
+      mother: { name: 'Jane Adeleke', account: '0111222333', bankCode: '058', bankName: 'Guaranty Trust Bank' },
+      sister: { name: 'Grace Adeleke', account: '0222333444', bankCode: '044', bankName: 'Access Bank' },
+      landlord: { name: 'Chief Okon', account: '0333444555', bankCode: '057', bankName: 'Zenith Bank' },
+      john: { name: 'John Doe', account: '0444555666', bankCode: '011', bankName: 'First Bank' },
+      brother: { name: 'Emeka Okonkwo', account: '0555666777', bankCode: '033', bankName: 'United Bank for Africa' },
+      wife: { name: 'Fatima Adeleke', account: '0666777888', bankCode: '011', bankName: 'First Bank of Nigeria' },
+    };
+
+    if (seededAliases[cleanLower]) {
+      const aliasData = seededAliases[cleanLower];
+      return {
+        accountNumber: aliasData.account,
+        accountName: aliasData.name,
+        bankCode: aliasData.bankCode,
+        bankName: aliasData.bankName,
+        alias: raw,
+      };
+    }
+
+    // 4. Default simulated external bank recipient
+    return {
+      accountNumber: '9999999999',
+      accountName: raw.toUpperCase(),
+      bankCode: '058',
+      bankName: 'Guaranty Trust Bank (Simulated)',
+      alias: raw,
+    };
+  }
+
+  /**
+   * Phase 1 (Batch): Creates preview for multiple simultaneous transfers in one message.
+   */
+  async createBatchTransferPreview(
+    senderCustomerId: string,
+    transfers: Array<{ amountKobo: bigint; recipient: string }>,
+  ): Promise<{
+    previews: MockTransferPreview[];
+    totalAmountKobo: bigint;
+    totalFeeKobo: bigint;
+    totalDebitKobo: bigint;
+    expiresInMinutes: number;
+  }> {
+    const sender = await this.prisma.customerProfile.findUnique({
+      where: { id: senderCustomerId },
+    });
+    if (!sender) {
+      throw new NotFoundException(`Sender customer ${senderCustomerId} not found.`);
+    }
+
+    const feePerTransfer = MOCK_FINANCIAL_CONSTANTS.DEFAULT_TRANSFER_FEE_KOBO;
+    let totalAmount = 0n;
+    let totalFee = 0n;
+
+    for (const t of transfers) {
+      if (t.amountKobo <= 0n) {
+        throw new FinancialInvariantException('All transfer amounts must be strictly positive.');
+      }
+      totalAmount += t.amountKobo;
+      totalFee += feePerTransfer;
+    }
+
+    const totalRequired = totalAmount + totalFee;
+
+    // Check sender available balance
+    let senderAccount = await this.prisma.ledgerAccount.findUnique({
+      where: { accountNumber: `21000-${senderCustomerId}` },
+    });
+    if (!senderAccount || senderAccount.balanceKobo === 0n) {
+      await this.ensureCustomerAccount(senderCustomerId, sender.fullName);
+      senderAccount = await this.prisma.ledgerAccount.findUnique({
+        where: { accountNumber: `21000-${senderCustomerId}` },
+      });
+    }
+    const currentBalance = senderAccount?.balanceKobo ?? 0n;
+
+    if (currentBalance < totalRequired) {
+      throw new InsufficientFundsException(
+        `Insufficient funds for multiple transfers. Required: ₦${Number(totalRequired) / 100}, Available: ₦${Number(currentBalance) / 100}`,
+      );
+    }
+
+    const previews: MockTransferPreview[] = [];
+    const batchExpiryMinutes = MOCK_FINANCIAL_CONSTANTS.CONFIRMATION_EXPIRY_MINUTES;
+
+    for (const t of transfers) {
+      const recipientInfo = await this.resolveDestinationRecipient(senderCustomerId, t.recipient);
+      const internalReference = `MOCK_TXN_${Date.now()}_${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+      const challengeToken = crypto.randomBytes(12).toString('hex');
+      const expiresAt = new Date(Date.now() + batchExpiryMinutes * 60 * 1000);
+
+      const txn = await this.prisma.transaction.create({
+        data: {
+          internalReference,
+          idempotencyKey: `IDEMP_${internalReference}`,
+          customerId: senderCustomerId,
+          type: TransactionType.TRANSFER,
+          state: TransactionState.AWAITING_AUTHORIZATION,
+          amountKobo: t.amountKobo,
+          feeKobo: feePerTransfer,
+          currency: 'NGN',
+          destinationAccountNumber: recipientInfo.accountNumber,
+          destinationBankCode: recipientInfo.bankCode,
+          destinationAccountName: recipientInfo.accountName,
+          recipientAlias: recipientInfo.alias,
+          isSimulated: true,
+        },
+      });
+
+      await this.prisma.transactionAuthorization.create({
+        data: {
+          transactionId: txn.id,
+          challengeToken,
+          expiresAt,
+        },
+      });
+
+      previews.push({
+        transactionId: txn.id,
+        internalReference,
+        amountKobo: t.amountKobo,
+        feeKobo: feePerTransfer,
+        totalDebitKobo: t.amountKobo + feePerTransfer,
+        currency: 'NGN',
+        recipientName: recipientInfo.accountName,
+        recipientAccountNumber: recipientInfo.accountNumber,
+        recipientBankName: recipientInfo.bankName,
+        challengeToken,
+        expiresInMinutes: batchExpiryMinutes,
+        isSimulated: true,
+      });
+    }
+
+    return {
+      previews,
+      totalAmountKobo: totalAmount,
+      totalFeeKobo: totalFee,
+      totalDebitKobo: totalRequired,
+      expiresInMinutes: batchExpiryMinutes,
+    };
+  }
+
   async createTransferPreview(
     senderCustomerId: string,
     recipientAliasOrAccount: string,
@@ -246,68 +479,18 @@ export class MockFinancialService {
       );
     }
 
-    // Resolve Recipient (saved alias/recipient or another mock customer)
-    let recipientInfo: {
-      accountNumber: string;
-      accountName: string;
-      bankCode: string;
-      bankName: string;
-      alias: string;
-    } = {
-      accountNumber: '',
-      accountName: '',
-      bankCode: MOCK_FINANCIAL_CONSTANTS.SIMULATED_BANK_CODE,
-      bankName: MOCK_FINANCIAL_CONSTANTS.SIMULATED_BANK_NAME,
-      alias: recipientAliasOrAccount,
-    };
-
-    try {
-      const resolved = await this.recipientsService.resolveRecipient(
-        senderCustomerId,
-        recipientAliasOrAccount,
-      );
-      recipientInfo = {
-        accountNumber: resolved.accountNumber,
-        accountName: resolved.accountName,
-        bankCode: resolved.bankCode,
-        bankName: resolved.bankName,
-        alias: recipientAliasOrAccount,
-      };
-    } catch {
-      // Check if recipient is another mock customer by virtual account or phone
-      const cleanTarget = recipientAliasOrAccount.replace(/[^0-9]/g, '');
-      const otherCustomer = await this.prisma.customerProfile.findFirst({
-        where: {
-          OR: [
-            { whatsappNumber: cleanTarget },
-            { accountReference: cleanTarget },
-          ],
-        },
-      });
-
-      if (otherCustomer) {
-        recipientInfo = {
-          accountNumber: otherCustomer.accountReference || `01${otherCustomer.whatsappNumber.slice(-8)}`,
-          accountName: otherCustomer.fullName,
-          bankCode: MOCK_FINANCIAL_CONSTANTS.SIMULATED_BANK_CODE,
-          bankName: MOCK_FINANCIAL_CONSTANTS.SIMULATED_BANK_NAME,
-          alias: otherCustomer.fullName,
-        };
-      } else {
-        // Fallback default mock recipient (never reuse a real virtual account)
-        recipientInfo = {
-          accountNumber: '9999999999',
-          accountName: recipientAliasOrAccount.toUpperCase(),
-          bankCode: '058',
-          bankName: 'Guaranty Trust Bank (Simulated)',
-          alias: recipientAliasOrAccount,
-        };
-      }
-    }
+    // Resolve Recipient (saved alias/recipient, another mock customer, or external)
+    const recipientInfo = await this.resolveDestinationRecipient(
+      senderCustomerId,
+      recipientAliasOrAccount,
+    );
 
     // Prevent self-transfer
     const senderVirtualAccount = sender.accountReference || `01${sender.whatsappNumber.slice(-8)}`;
-    if (recipientInfo.accountNumber === senderVirtualAccount) {
+    if (
+      recipientInfo.accountNumber === senderVirtualAccount ||
+      (recipientInfo.internalCustomerId && recipientInfo.internalCustomerId === senderCustomerId)
+    ) {
       throw new BadRequestException('Self-transfers are not permitted.');
     }
 
@@ -367,6 +550,127 @@ export class MockFinancialService {
   /**
    * Phase 2: Authorizes and atomically executes a pending transfer upon explicit confirmation.
    */
+  /**
+   * Authorizes and atomically executes a batch of pending transfers.
+   */
+  private async executeBatchConfirm(
+    senderCustomerId: string,
+    pendingTxns: any[],
+  ): Promise<MockTransferExecutionResult> {
+    const validTxns = pendingTxns.filter((t) => {
+      const a = (t.authorizations || []).find((auth: any) => !auth.isUsed);
+      return a && a.expiresAt > new Date();
+    });
+
+    if (validTxns.length === 0) {
+      throw new UnauthorizedTransactionException('All transaction authorizations expired.');
+    }
+
+    let totalRequiredKobo = 0n;
+    for (const t of validTxns) {
+      totalRequiredKobo += t.amountKobo + t.feeKobo;
+    }
+
+    const senderAccountNum = `21000-${senderCustomerId}`;
+    const senderAccount = await this.prisma.ledgerAccount.findUnique({
+      where: { accountNumber: senderAccountNum },
+    });
+
+    if (!senderAccount || senderAccount.balanceKobo < totalRequiredKobo) {
+      for (const t of validTxns) {
+        await this.prisma.transaction.update({
+          where: { id: t.id },
+          data: { state: TransactionState.FAILED, failureReason: 'Insufficient balance at execution' },
+        });
+      }
+      throw new InsufficientFundsException('Insufficient funds to complete batch transfers.');
+    }
+
+    const executedItems: Array<{ recipientName: string; amountKobo: bigint; reference: string }> = [];
+
+    for (const t of validTxns) {
+      const destinationAccountNum = t.destinationAccountNumber!;
+      const internalRecipient = await this.prisma.customerProfile.findFirst({
+        where: {
+          OR: [
+            { accountReference: destinationAccountNum },
+            { whatsappNumber: destinationAccountNum },
+          ],
+        },
+      });
+
+      const clearingAccount = internalRecipient
+        ? `21000-${internalRecipient.id}`
+        : CHART_OF_ACCOUNTS.PROVIDER_CLEARING;
+
+      const singleRequired = t.amountKobo + t.feeKobo;
+
+      await this.ledgerService.postJournal({
+        reference: `JRN_MOCK_${t.internalReference}`,
+        idempotencyKey: `IDEMP_JRN_${t.internalReference}`,
+        description: `Simulated transfer to ${t.destinationAccountName}`,
+        transactionId: t.id,
+        entries: [
+          {
+            accountNumber: senderAccountNum,
+            direction: EntryDirection.DEBIT,
+            amountKobo: singleRequired,
+          },
+          {
+            accountNumber: clearingAccount,
+            direction: EntryDirection.CREDIT,
+            amountKobo: t.amountKobo,
+          },
+          {
+            accountNumber: CHART_OF_ACCOUNTS.TRANSACTION_FEE_REVENUE,
+            direction: EntryDirection.CREDIT,
+            amountKobo: t.feeKobo,
+          },
+        ],
+      });
+
+      await this.prisma.transaction.update({
+        where: { id: t.id },
+        data: {
+          state: TransactionState.SUCCESSFUL,
+          providerReference: `SIM_RAILS_${t.internalReference}`,
+        },
+      });
+
+      const auth = (t.authorizations || []).find((a: any) => !a.isUsed);
+      if (auth) {
+        await this.prisma.transactionAuthorization.update({
+          where: { id: auth.id },
+          data: { isUsed: true },
+        });
+      }
+
+      executedItems.push({
+        recipientName: t.destinationAccountName || t.recipientAlias || 'Recipient',
+        amountKobo: t.amountKobo,
+        reference: t.internalReference,
+      });
+    }
+
+    const newBalance = (await this.getBalance(senderCustomerId)).availableBalanceKobo;
+
+    return {
+      transactionId: validTxns[0].id,
+      internalReference: validTxns[0].internalReference,
+      amountKobo: totalRequiredKobo,
+      feeKobo: BigInt(validTxns.length) * MOCK_FINANCIAL_CONSTANTS.DEFAULT_TRANSFER_FEE_KOBO,
+      totalDebitedKobo: totalRequiredKobo,
+      recipientName: validTxns.map((t) => t.destinationAccountName).join(', '),
+      recipientAccountNumber: validTxns.map((t) => t.destinationAccountNumber).join(', '),
+      recipientBankName: 'WAPPay Mock Rails',
+      newBalanceKobo: newBalance,
+      status: 'SUCCESSFUL',
+      settlementMessage: `${validTxns.length} transfers executed successfully.`,
+      batchItems: executedItems,
+      isSimulated: true,
+    };
+  }
+
   async confirmTransfer(
     senderCustomerId: string,
     confirmationInput: string,
@@ -385,8 +689,8 @@ export class MockFinancialService {
       );
     }
 
-    // Find active pending transaction for this customer
-    const txn = await this.prisma.transaction.findFirst({
+    // Find all active pending transactions for this customer
+    const pendingTxns = await this.prisma.transaction.findMany({
       where: {
         customerId: senderCustomerId,
         state: TransactionState.AWAITING_AUTHORIZATION,
@@ -395,9 +699,16 @@ export class MockFinancialService {
       orderBy: { createdAt: 'desc' },
     });
 
-    if (!txn) {
+    if (!pendingTxns || pendingTxns.length === 0) {
       throw new NotFoundException('No pending transfer found awaiting confirmation.');
     }
+
+    // Check if this was a batch transfer or single transfer
+    if (pendingTxns.length > 1) {
+      return await this.executeBatchConfirm(senderCustomerId, pendingTxns);
+    }
+
+    const txn = pendingTxns[0];
 
     const auth = txn.authorizations.find((a) => !a.isUsed);
     if (!auth || auth.expiresAt < new Date()) {
@@ -880,17 +1191,30 @@ export class MockFinancialService {
   /**
    * Ensures the customer's dedicated liability ledger account exists.
    */
-  private async ensureCustomerAccount(customerId: string, fullName = 'Customer') {
-    await this.prisma.ledgerAccount.upsert({
+  private async ensureCustomerAccount(
+    customerId: string,
+    fullName = 'Customer',
+    starterBalanceKobo = MOCK_FINANCIAL_CONSTANTS.INITIAL_STARTER_BALANCE_KOBO,
+  ) {
+    const existing = await this.prisma.ledgerAccount.findUnique({
       where: { accountNumber: `21000-${customerId}` },
-      update: {},
-      create: {
-        accountNumber: `21000-${customerId}`,
-        name: `Simulated Customer Deposit - ${fullName}`,
-        type: LedgerAccountType.LIABILITY,
-        customerId,
-        balanceKobo: 0n,
-      },
     });
+
+    if (!existing) {
+      await this.prisma.ledgerAccount.create({
+        data: {
+          accountNumber: `21000-${customerId}`,
+          name: `Simulated Customer Deposit - ${fullName}`,
+          type: LedgerAccountType.LIABILITY,
+          customerId,
+          balanceKobo: starterBalanceKobo,
+        },
+      });
+    } else if (existing.balanceKobo === 0n && starterBalanceKobo > 0n) {
+      await this.prisma.ledgerAccount.update({
+        where: { id: existing.id },
+        data: { balanceKobo: starterBalanceKobo },
+      });
+    }
   }
 }

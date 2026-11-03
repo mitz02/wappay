@@ -47,7 +47,7 @@ export class IncomingMessageHandler {
 
     // 2. Handle Voice / Audio Notes via VoiceService Pipeline
     if (message.type === WHATSAPP_MESSAGE_TYPES.AUDIO || message.type === 'voice') {
-      const audioMedia = message.audio;
+      const audioMedia = message.audio || (message as any).voice;
       this.logger.log(
         `Received voice note from ${maskedPhone} (Media ID: ${audioMedia?.id || 'none'})`,
       );
@@ -79,7 +79,7 @@ export class IncomingMessageHandler {
             audioBuffer,
             senderPhone: normalizedPhone,
             senderName: contactName,
-            mimeType: audioMedia.mime_type || 'audio/ogg',
+            mimeType: audioMedia.mime_type || (message as any).voice?.mime_type || 'audio/ogg',
           });
         } catch (err: unknown) {
           const error = err as { message?: string };

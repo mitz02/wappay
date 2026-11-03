@@ -52,6 +52,7 @@ export interface MockTransferExecutionResult {
   newBalanceKobo: bigint;
   status: 'SUCCESSFUL' | 'FAILED';
   settlementMessage: string;
+  batchItems?: Array<{ recipientName: string; amountKobo: bigint; reference: string }>;
   isSimulated: true;
 }
 

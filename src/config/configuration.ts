@@ -5,6 +5,7 @@ export default () => ({
   isSimulated: process.env.IS_SIMULATED === 'true',
   database: {
     url: process.env.DATABASE_URL,
+    mode: process.env.DATABASE_MODE || 'mock',
   },
   redis: {
     host: process.env.REDIS_HOST || 'localhost',
@@ -18,11 +19,15 @@ export default () => ({
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
   },
   whatsapp: {
-    phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
-    accessToken: process.env.WHATSAPP_ACCESS_TOKEN,
-    webhookVerifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN,
-    appSecret: process.env.WHATSAPP_APP_SECRET,
+    accessToken: process.env.WHATSAPP_ACCESS_TOKEN || '',
+    phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+    businessAccountId: process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '',
+    verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || '',
+    appSecret: process.env.WHATSAPP_APP_SECRET || '',
+    apiUrl: process.env.WHATSAPP_API_URL || 'https://graph.facebook.com/v21.0',
+    apiTimeoutMs: parseInt(process.env.WHATSAPP_API_TIMEOUT_MS || '10000', 10),
   },
+  financialMode: process.env.FINANCIAL_MODE || 'mock',
   financialProvider: {
     name: process.env.FINANCIAL_PROVIDER || 'sandbox',
     publicKey: process.env.FINANCIAL_PROVIDER_PUBLIC_KEY,
@@ -30,8 +35,12 @@ export default () => ({
     webhookSecret: process.env.FINANCIAL_PROVIDER_WEBHOOK_SECRET,
   },
   ai: {
-    provider: process.env.AI_PROVIDER || 'sandbox',
+    provider: process.env.AI_PROVIDER || 'groq',
     apiKey: process.env.OPENAI_API_KEY,
+  },
+  groq: {
+    apiKey: process.env.GROQ_API_KEY || '',
+    model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
   },
   finance: {
     currency: process.env.CURRENCY || 'NGN',

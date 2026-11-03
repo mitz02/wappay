@@ -156,9 +156,27 @@ model CustomerProfile {
   recipientAliases   RecipientAlias[]
   transactions       Transaction[]
   ledgerAccounts     LedgerAccount[]
+  conversationMessages ConversationMessage[]
 
   @@index([status])
   @@map("customer_profiles")
+}
+
+// -----------------------------------------------------------------------------
+// CONVERSATIONS & CHAT HISTORY
+// -----------------------------------------------------------------------------
+
+model ConversationMessage {
+  id               String          @id @default(uuid())
+  customerId       String
+  customer         CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  role             String          // "user" | "assistant" | "system"
+  content          String
+  metadata         String?         // Optional JSON metadata (model, tokens, latency)
+  createdAt        DateTime        @default(now())
+
+  @@index([customerId, createdAt])
+  @@map("conversation_messages")
 }
 
 // -----------------------------------------------------------------------------

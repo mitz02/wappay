@@ -7,15 +7,19 @@ import { ConfigService } from '@nestjs/config';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule);
+
+  // CRITICAL FOR META SIGNATURE VERIFICATION: Enable rawBody capture
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   const configService = app.get(ConfigService);
   const port = configService.get<number>('port') || 3000;
   const prefix = configService.get<string>('apiPrefix') || 'api/v1';
   const isSimulated = configService.get<boolean>('isSimulated');
 
-  // Set global API prefix
-  app.setGlobalPrefix(prefix);
+  // Set global API prefix, excluding direct webhooks so /webhooks/whatsapp works cleanly
+  app.setGlobalPrefix(prefix, {
+    exclude: ['webhooks/whatsapp', 'webhooks/whatsapp/(.*)'],
+  });
 
   // Global validation pipe
   app.useGlobalPipes(
@@ -36,7 +40,7 @@ async function bootstrap() {
   const config = new DocumentBuilder()
     .setTitle('WAPPay Banking API')
     .setDescription(
-      'Bank-grade AI-powered conversational financial platform with double-entry accounting ledger.',
+      'Bank-grade AI-powered conversational financial platform with WhatsApp Cloud API integration.',
     )
     .setVersion('1.0.0')
     .addBearerAuth()
@@ -49,6 +53,7 @@ async function bootstrap() {
 
   logger.log(`=======================================================`);
   logger.log(`🚀 WAPPay Banking Core running on: http://localhost:${port}/${prefix}`);
+  logger.log(`📲 WhatsApp Webhook live on:       http://localhost:${port}/webhooks/whatsapp`);
   logger.log(`📖 OpenAPI / Swagger Docs at:    http://localhost:${port}/docs`);
   logger.log(`🛡️ IS_SIMULATED Safety Gate:     ${isSimulated ? 'ENABLED (Sandbox Mode)' : 'DISABLED (Live Mode)'}`);
   logger.log(`=======================================================`);

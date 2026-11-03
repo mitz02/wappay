@@ -36,6 +36,10 @@ export class EnvironmentVariables {
   DATABASE_URL?: string;
 
   @IsString()
+  @IsOptional()
+  DATABASE_MODE?: string = 'mock';
+
+  @IsString()
   @IsNotEmpty()
   REDIS_HOST: string = 'localhost';
 
@@ -62,6 +66,39 @@ export class EnvironmentVariables {
   @IsNotEmpty()
   JWT_REFRESH_EXPIRES_IN: string = '7d';
 
+  // WhatsApp Cloud API Configuration
+  @IsString()
+  @IsOptional()
+  WHATSAPP_ACCESS_TOKEN?: string;
+
+  @IsString()
+  @IsOptional()
+  WHATSAPP_PHONE_NUMBER_ID?: string;
+
+  @IsString()
+  @IsOptional()
+  WHATSAPP_BUSINESS_ACCOUNT_ID?: string;
+
+  @IsString()
+  @IsOptional()
+  WHATSAPP_VERIFY_TOKEN?: string;
+
+  @IsString()
+  @IsOptional()
+  WHATSAPP_APP_SECRET?: string;
+
+  @IsString()
+  @IsOptional()
+  WHATSAPP_API_URL?: string = 'https://graph.facebook.com/v21.0';
+
+  @IsNumber()
+  @IsOptional()
+  WHATSAPP_API_TIMEOUT_MS?: number = 10000;
+
+  @IsString()
+  @IsNotEmpty()
+  FINANCIAL_MODE: string = 'mock';
+
   @IsString()
   @IsNotEmpty()
   FINANCIAL_PROVIDER: string = 'sandbox';
@@ -69,6 +106,14 @@ export class EnvironmentVariables {
   @IsString()
   @IsNotEmpty()
   AI_PROVIDER: string = 'sandbox';
+
+  @IsString()
+  @IsOptional()
+  GROQ_API_KEY?: string;
+
+  @IsString()
+  @IsOptional()
+  GROQ_MODEL?: string = 'llama-3.3-70b-versatile';
 
   @IsString()
   @IsNotEmpty()
@@ -84,6 +129,8 @@ export function validateEnvironment(config: Record<string, unknown>) {
       config.IS_SIMULATED === undefined
         ? true
         : config.IS_SIMULATED === 'true' || config.IS_SIMULATED === true,
+    WHATSAPP_API_TIMEOUT_MS: Number(config.WHATSAPP_API_TIMEOUT_MS || 10000),
+    WHATSAPP_VERIFY_TOKEN: config.WHATSAPP_VERIFY_TOKEN || config.WHATSAPP_WEBHOOK_VERIFY_TOKEN,
   });
 
   const errors = validateSync(transformed, { skipMissingProperties: false });
@@ -95,10 +142,11 @@ export function validateEnvironment(config: Record<string, unknown>) {
     throw new Error(`CRITICAL CONFIGURATION ERROR:\n${formattedErrors}`);
   }
 
-  // Double check Production safety gate
-  if (transformed.NODE_ENV === Environment.Production && transformed.IS_SIMULATED === true) {
-    // Allowed during initial sandbox verification in production environment
-    console.warn('⚠️ WARNING: Running in production environment with IS_SIMULATED=true. Live transactions are disabled.');
+  // Enforce production security check
+  if (transformed.NODE_ENV === Environment.Production && transformed.IS_SIMULATED === false) {
+    if (!transformed.WHATSAPP_ACCESS_TOKEN || !transformed.WHATSAPP_APP_SECRET || !transformed.WHATSAPP_VERIFY_TOKEN) {
+      throw new Error('CRITICAL CONFIGURATION ERROR: Live production requires valid WhatsApp credentials.');
+    }
   }
 
   return transformed;

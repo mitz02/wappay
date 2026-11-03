@@ -28,3 +28,22 @@ export interface IAIProvider {
   extractIntent(text: string): Promise<ParsedIntentProposal>;
   transcribeAudio(audioBuffer: Buffer): Promise<string>;
 }
+
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+export interface ChatCompletionOptions {
+  temperature?: number;
+  maxTokens?: number;
+  timeoutMs?: number;
+}
+
+export interface IChatProvider {
+  readonly providerName: string;
+  generateChatResponse(
+    messages: ChatMessage[],
+    options?: ChatCompletionOptions,
+  ): Promise<string>;
+}

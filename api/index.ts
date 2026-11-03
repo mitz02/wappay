@@ -12,18 +12,25 @@ let handlerPromise: Promise<(req: Request, res: Response) => unknown> | undefine
 
 async function createHandler() {
   const server = express();
+  server.get('/', (_req, res) => res.redirect('/docs'));
+
   const app = await NestFactory.create(AppModule, new ExpressAdapter(server), {
     bufferLogs: true,
+    rawBody: true,
   });
   const configService = app.get(ConfigService);
   const prefix = configService.get<string>('apiPrefix') || 'api/v1';
 
-  app.setGlobalPrefix(prefix);
-  app.useGlobalPipes(new ValidationPipe({
-    whitelist: true,
-    transform: true,
-    forbidNonWhitelisted: true,
-  }));
+  app.setGlobalPrefix(prefix, {
+    exclude: ['webhooks/whatsapp', 'webhooks/whatsapp/(.*)'],
+  });
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: true,
+    }),
+  );
   app.useGlobalFilters(new GlobalExceptionFilter());
 
   const swaggerConfig = new DocumentBuilder()

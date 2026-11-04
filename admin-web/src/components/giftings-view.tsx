@@ -19,9 +19,20 @@ import {
   RotateCcw,
   ChevronDown,
   X,
+  Smartphone,
+  Wifi,
+  Banknote,
+  Cake,
+  PartyPopper,
 } from 'lucide-react';
 
 type GiftType = 'Airtime' | 'Data' | 'Cash';
+
+const GIFT_TYPE_OPTIONS: Array<{ type: GiftType; label: string; helper: string; icon: typeof Smartphone; tone: string }> = [
+  { type: 'Airtime', label: 'Airtime', helper: 'Top up instantly', icon: Smartphone, tone: 'emerald' },
+  { type: 'Data', label: 'Data', helper: 'Keep them connected', icon: Wifi, tone: 'sky' },
+  { type: 'Cash', label: 'Cash', helper: 'Send spending money', icon: Banknote, tone: 'violet' },
+];
 type GiftStatus = 'DELIVERED' | 'PENDING' | 'REVERSED';
 type Occasion = 'Birthday' | 'Anniversary' | 'Thank You' | 'Celebration' | 'Just Because';
 
@@ -470,15 +481,24 @@ export function GiftingsView() {
         {/* Gift composer */}
         <div id="gift-composer" className="xl:col-span-1">
           <div className="sticky top-6 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/40">
-            <div className="border-b border-slate-800 p-5">
-              <div className="flex items-center gap-2">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-400">
-                  <Send className="h-4 w-4" />
-                </span>
-                <div>
-                  <h3 className="text-base font-semibold text-white">Send a Gift</h3>
-                  <p className="text-xs text-slate-400">Deliver in seconds via WhatsApp</p>
+            <div className="relative overflow-hidden border-b border-emerald-400/20 bg-gradient-to-br from-emerald-500/20 via-slate-900 to-violet-500/15 p-5">
+              <div className="absolute -right-8 -top-10 h-28 w-28 rounded-full bg-emerald-400/10 blur-2xl" />
+              <div className="relative flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-300/30 bg-emerald-400/15 text-emerald-300 shadow-lg shadow-emerald-950/30">
+                    <Gift className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <div className="mb-1 inline-flex items-center gap-1.5 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-emerald-300">
+                      <Sparkles className="h-3 w-3" /> WhatsApp gift
+                    </div>
+                    <h3 className="text-lg font-bold tracking-tight text-white">Send a little joy</h3>
+                    <p className="mt-0.5 text-xs text-slate-300">Deliver in seconds via WhatsApp</p>
+                  </div>
                 </div>
+                <span className="rounded-full border border-white/10 bg-white/5 p-2 text-rose-300" aria-hidden="true">
+                  <Heart className="h-4 w-4 fill-current" />
+                </span>
               </div>
             </div>
 
@@ -514,19 +534,31 @@ export function GiftingsView() {
                   Gift type
                 </label>
                 <div className="grid grid-cols-3 gap-2">
-                  {(['Airtime', 'Data', 'Cash'] as const).map((type) => (
-                    <button
-                      key={type}
-                      onClick={() => setGiftType(type)}
-                      className={`rounded-lg border px-2 py-2 text-xs font-semibold transition ${
-                        giftType === type
-                          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
-                          : 'border-slate-700 bg-slate-950/40 text-slate-400 hover:border-slate-600 hover:text-slate-200'
-                      }`}
-                    >
-                      {type}
-                    </button>
-                  ))}
+                  {GIFT_TYPE_OPTIONS.map(({ type, label, helper, icon: Icon, tone }) => {
+                    const isSelected = giftType === type;
+                    const toneClasses = {
+                      emerald: isSelected ? 'border-emerald-400/50 bg-emerald-400/15 text-emerald-200' : 'text-emerald-300',
+                      sky: isSelected ? 'border-sky-400/50 bg-sky-400/15 text-sky-200' : 'text-sky-300',
+                      violet: isSelected ? 'border-violet-400/50 bg-violet-400/15 text-violet-200' : 'text-violet-300',
+                    }[tone];
+                    return (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setGiftType(type)}
+                        aria-pressed={isSelected}
+                        className={`group rounded-xl border p-2.5 text-left transition hover:-translate-y-0.5 hover:border-slate-600 ${
+                          isSelected ? toneClasses : 'border-slate-700 bg-slate-950/40 hover:bg-slate-900'
+                        }`}
+                      >
+                        <span className={`mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-white/5 ${isSelected ? '' : toneClasses}`}>
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        <span className="block text-xs font-bold text-white">{label}</span>
+                        <span className="mt-0.5 block text-[10px] leading-tight text-slate-400">{helper}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 

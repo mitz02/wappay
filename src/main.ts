@@ -19,7 +19,14 @@ async function bootstrap() {
 
   // Set global API prefix, excluding direct webhooks so /webhooks/whatsapp works cleanly
   app.setGlobalPrefix(prefix, {
-    exclude: ['webhooks/whatsapp', 'webhooks/whatsapp/(.*)', 'gift', 'gift/(.*)'],
+    exclude: [
+      'webhooks/whatsapp',
+      'webhooks/whatsapp/(.*)',
+      'gift',
+      'gift/(.*)',
+      'media',
+      'media/(.*)',
+    ],
   });
 
   // Global validation pipe

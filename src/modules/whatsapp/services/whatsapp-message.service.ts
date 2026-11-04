@@ -25,6 +25,7 @@ export class WhatsAppMessageService {
    */
   /**
    * Sends an interactive button reply message.
+   * Optional image header via `headerImageUrl` (network logos, banners).
    */
   async sendInteractiveButtons(
     to: string,
@@ -33,6 +34,7 @@ export class WhatsAppMessageService {
     headerText?: string,
     footerText?: string,
     replyToMessageId?: string,
+    headerImageUrl?: string,
   ): Promise<WhatsAppApiResponse> {
     return await this.apiService.sendInteractiveButtons(
       to,
@@ -41,7 +43,30 @@ export class WhatsAppMessageService {
       headerText,
       footerText,
       replyToMessageId,
+      headerImageUrl,
     );
+  }
+
+  /**
+   * Sends an image message (public HTTPS URL) optionally captioned.
+   */
+  async sendImageMessage(
+    to: string,
+    imageUrl: string,
+    caption?: string,
+    replyToMessageId?: string,
+  ): Promise<WhatsAppApiResponse> {
+    return await this.apiService.sendImageMessage(
+      to,
+      imageUrl,
+      caption,
+      replyToMessageId,
+    );
+  }
+
+  /** Absolute public URL for a /media/networks/ asset. */
+  getNetworkMediaUrl(fileName: string): string {
+    return this.apiService.getNetworkMediaUrl(fileName);
   }
 
   /**

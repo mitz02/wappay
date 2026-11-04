@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AIModule } from '../artificial-intelligence/ai.module';
 import { VoiceModule } from '../voice/voice.module';
 import { WhatsAppWebhookController } from './controllers/whatsapp-webhook.controller';
+import { MediaController } from './controllers/media.controller';
 import { WhatsAppSignatureService } from './services/whatsapp-signature.service';
 import { WhatsAppApiService } from './services/whatsapp-api.service';
 import { WhatsAppMessageService } from './services/whatsapp-message.service';
@@ -20,10 +21,11 @@ import { IncomingMessageHandler } from './handlers/incoming-message.handler';
  *   - Inbound message routing through the Groq AI Conversational Pipeline
  *   - Inbound voice note transcription via VoiceModule (Whisper Large v3)
  *   - Deduplication via the webhook_inbox Prisma model
+ *   - Public media assets for network logos (/media/networks/*)
  */
 @Module({
   imports: [ConfigModule, AIModule, VoiceModule],
-  controllers: [WhatsAppWebhookController],
+  controllers: [WhatsAppWebhookController, MediaController],
   providers: [
     WhatsAppSignatureService,
     WhatsAppApiService,

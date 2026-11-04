@@ -215,27 +215,35 @@ export class IncomingMessageHandler {
           await this.messageService.sendReply(normalizedPhone, replyText, message.id);
         });
       } else if (replyText.includes('SELECT DATA NETWORK')) {
-        await this.messageService.sendInteractiveList(
-          normalizedPhone,
-          '🌐 *Instant Mobile Internet Data Top-Up*\nPlease choose your mobile network provider below:',
-          'Select Network',
-          [
-            {
-              title: 'Mobile Networks',
-              rows: [
-                { id: 'MTN', title: '🟡 MTN Nigeria', description: 'Instant 4G/5G • 3% Cashback' },
-                { id: 'AIRTEL', title: '🔴 Airtel Nigeria', description: 'Smart Speed • 3% Cashback' },
-                { id: 'GLO', title: '🟢 Glo Nigeria', description: 'Unlimited Grand • 3% Cashback' },
-                { id: '9MOBILE', title: '🟢 9mobile', description: 'Super Fast • 3% Cashback' },
-              ],
-            },
-          ],
-          '🌐 Data Top-Up',
-          'WAPPay Instant Banking',
-          message.id,
-        ).catch(async () => {
-          await this.messageService.sendReply(normalizedPhone, replyText, message.id);
-        });
+        // Meta allows max 3 reply buttons — show MTN/Airtel/Glo as buttons;
+        // 9mobile remains typeable (body text + resolveNetworkChoice).
+        const bannerUrl = this.messageService.getNetworkMediaUrl(
+          'data-network-banner.png',
+        );
+        await this.messageService
+          .sendInteractiveButtons(
+            normalizedPhone,
+            '🌐 *Instant Mobile Internet Data Top-Up*\n\n' +
+              'Choose your network below:\n' +
+              '🎁 *3% instant cashback* on every bundle\n\n' +
+              "Don't see 9mobile? Reply with *9mobile*",
+            [
+              { id: 'MTN', title: '🟡 MTN' },
+              { id: 'AIRTEL', title: '🔴 Airtel' },
+              { id: 'GLO', title: '🟢 Glo' },
+            ],
+            undefined,
+            'WAPPay Instant Banking',
+            message.id,
+            bannerUrl,
+          )
+          .catch(async () => {
+            await this.messageService.sendReply(
+              normalizedPhone,
+              replyText,
+              message.id,
+            );
+          });
       } else if (replyText.includes('SELECT DATA PLAN')) {
         const net = replyText.includes('Airtel')
           ? 'AIRTEL'
@@ -245,6 +253,27 @@ export class IncomingMessageHandler {
           ? '9MOBILE'
           : 'MTN';
         const packages = DATA_PACKAGES[net] || DATA_PACKAGES.MTN;
+        const logoFile =
+          net === 'AIRTEL'
+            ? 'data-airtel.png'
+            : net === 'GLO'
+            ? 'data-glo.png'
+            : net === '9MOBILE'
+            ? 'data-9mobile.png'
+            : 'data-mtn.png';
+
+        // Network logo banner first (lists cannot carry image headers),
+        // then the interactive plan list.
+        try {
+          await this.messageService.sendImageMessage(
+            normalizedPhone,
+            this.messageService.getNetworkMediaUrl(logoFile),
+            `🌐 ${net} Data Bundles — pick a plan below`,
+            message.id,
+          );
+        } catch {
+          // Image is decorative; continue to the plan list.
+        }
 
         await this.messageService.sendInteractiveList(
           normalizedPhone,

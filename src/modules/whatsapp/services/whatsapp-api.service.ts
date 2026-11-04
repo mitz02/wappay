@@ -75,6 +75,7 @@ export class WhatsAppApiService {
   /**
    * Dispatches an interactive button message to the Meta WhatsApp Cloud API.
    * Maximum 3 buttons per Meta WhatsApp specification.
+   * Optional image header (network logos etc.) when `headerImageUrl` is provided.
    */
   async sendInteractiveButtons(
     to: string,
@@ -83,6 +84,7 @@ export class WhatsAppApiService {
     headerText?: string,
     footerText = 'WAPPay Instant Banking',
     replyToMessageId?: string,
+    headerImageUrl?: string,
   ): Promise<WhatsAppApiResponse> {
     const cleanTo = to.replace(/[^0-9]/g, '');
     const actionButtons = buttons.slice(0, 3).map((b) => ({
@@ -106,14 +108,55 @@ export class WhatsAppApiService {
       },
     };
 
-    if (headerText) {
-      payload.interactive.header = { type: 'text', text: headerText };
+    if (headerImageUrl) {
+      payload.interactive.header = {
+        type: 'image',
+        image: { link: headerImageUrl },
+      };
+    } else if (headerText) {
+      payload.interactive.header = { type: 'text', text: headerText.slice(0, 60) };
     }
     if (replyToMessageId) {
       payload.context = { message_id: replyToMessageId };
     }
 
     return await this.dispatchPayload(cleanTo, payload);
+  }
+
+  /**
+   * Sends a standalone image message (optionally captioned) to the Meta WhatsApp Cloud API.
+   * `imageUrl` must be a publicly reachable HTTPS URL (Meta fetches it server-side).
+   */
+  async sendImageMessage(
+    to: string,
+    imageUrl: string,
+    caption?: string,
+    replyToMessageId?: string,
+  ): Promise<WhatsAppApiResponse> {
+    const cleanTo = to.replace(/[^0-9]/g, '');
+    const payload: any = {
+      messaging_product: WHATSAPP_CONFIG.MESSAGING_PRODUCT,
+      recipient_type: WHATSAPP_CONFIG.RECIPIENT_TYPE_INDIVIDUAL,
+      to: cleanTo,
+      type: 'image',
+      image: { link: imageUrl },
+    };
+    if (caption) {
+      payload.image.caption = caption.slice(0, 1024);
+    }
+    if (replyToMessageId) {
+      payload.context = { message_id: replyToMessageId };
+    }
+
+    return await this.dispatchPayload(cleanTo, payload);
+  }
+
+  /** Absolute public URL for a media asset served under /media/networks/. */
+  getNetworkMediaUrl(fileName: string): string {
+    const base = (
+      process.env.PUBLIC_APP_URL || 'https://wappay-ten.vercel.app'
+    ).replace(/\/+$/, '');
+    return `${base}/media/networks/${fileName}`;
   }
 
   /**

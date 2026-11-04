@@ -3,6 +3,7 @@ import { ConversationHistoryService } from './services/conversation-history.serv
 import { IntentParserService } from './services/intent-parser.service';
 import { MockFinancialService } from '../mock-financial/services/mock-financial.service';
 import { IChatProvider, ChatMessage } from '../../contracts/ai/ai-provider.contract';
+import { GiftService } from '../gifting/gift.service';
 
 describe('AIAssistantService', () => {
   let service: AIAssistantService;
@@ -10,6 +11,7 @@ describe('AIAssistantService', () => {
   let historyService: ConversationHistoryService;
   let intentParser: IntentParserService;
   let mockFinancialService: jest.Mocked<MockFinancialService>;
+  let giftService: jest.Mocked<GiftService>;
   let mockPrisma: any;
 
   const sampleCustomer = {
@@ -164,11 +166,20 @@ describe('AIAssistantService', () => {
       ]),
     } as any;
 
+    giftService = {
+      createGiftLink: jest.fn().mockReturnValue({
+        token: 'mock-token',
+        url: 'https://wappay-ten.vercel.app/gift/mock-token',
+        data: {} as any,
+      }),
+    } as any;
+
     service = new AIAssistantService(
       mockChatProvider,
       historyService,
       intentParser,
       mockFinancialService,
+      giftService,
     );
   });
 
@@ -342,8 +353,10 @@ describe('AIAssistantService', () => {
       undefined,
       'Happy Birthday',
     );
-    expect(receipt).toContain('GIFT SENT!');
+    expect(receipt).toContain('GIFT CREATED!');
     expect(receipt).toContain('MOCK_GFT_001');
+    expect(receipt).toContain('sent back to this test phone number');
+    expect(receipt).toContain('Claim this gift');
   });
 
   it('supports interactive list row IDs and self-gifting', async () => {
@@ -365,7 +378,8 @@ describe('AIAssistantService', () => {
       undefined,
       'A little something for you 🎁',
     );
-    expect(receipt).toContain('GIFT SENT!');
+    expect(receipt).toContain('GIFT CREATED!');
+    expect(receipt).toContain('Claim this gift');
   });
 
   it('recovers an interactive gift selection after a cold start', async () => {

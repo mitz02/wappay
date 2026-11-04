@@ -636,7 +636,7 @@ export class AIAssistantService {
     try {
       const result = await this.mockFinancialService.simulateGift(
         customer.id,
-        gift.kind,
+        gift.kind === 'MONEY' ? 'CASH' : gift.kind,
         session.recipientPhone!,
         gift.amountKobo,
         undefined,
@@ -751,12 +751,14 @@ export class AIAssistantService {
       `💌 "${session.message}"\n` +
       `👤 From: *${session.anonymous ? 'Anonymous' : session.senderName}*\n` +
       `📱 For: \`${result.recipientPhone}\`\n\n` +
-      `🔗 *Claim link:*\n${url}\n\n` +
+      `🔗 *Gift link:*\n${url}\n\n` +
+      `📲 *Test-mode delivery:* This link has been sent back to this test phone number instead of the recipient.\n` +
+      `👉 Open the link above to view the gift, then tap *Claim this gift* to claim it.\n\n` +
       `💸 *Amount Debited:* *${formatKoboToNaira(result.amountDebitedKobo)}*\n` +
       `🔖 *Reference:* \`${result.reference}\`\n` +
       `💳 *New Balance:* *${formatKoboToNaira(result.newBalanceKobo)}*\n` +
       `═══════════════════════════════════════\n` +
-      `_Test mode: the link was sent back to you instead of the recipient. Share it with them to claim._`
+      `_Mock data is used for this test; no real funds are moved._`
     );
   }
 

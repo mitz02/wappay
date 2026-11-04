@@ -10,10 +10,12 @@ import {
   FileCheck,
   AlertTriangle,
   Lock,
+  Gift,
 } from 'lucide-react';
+import { GiftingsView } from '@/components/giftings-view';
 
 export default function AdminDashboardPage() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'customers' | 'reconciliation' | 'audit'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'customers' | 'giftings' | 'reconciliation' | 'audit'>('overview');
   const [reconciliationRunning, setReconciliationRunning] = useState(false);
   const [reconciliationMessage, setReconciliationMessage] = useState<string | null>(null);
 
@@ -71,6 +73,16 @@ export default function AdminDashboardPage() {
               }`}
             >
               <Users className="h-4 w-4" /> Customers
+            </button>
+            <button
+              onClick={() => setActiveTab('giftings')}
+              className={`w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg font-medium transition ${
+                activeTab === 'giftings'
+                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+              }`}
+            >
+              <Gift className="h-4 w-4" /> Giftings
             </button>
             <button
               onClick={() => setActiveTab('reconciliation')}
@@ -232,7 +244,9 @@ export default function AdminDashboardPage() {
           </div>
         )}
 
-        {activeTab !== 'overview' && (
+        {activeTab === 'giftings' && <GiftingsView />}
+
+        {activeTab !== 'overview' && activeTab !== 'giftings' && (
           <div className="p-8 rounded-xl border border-slate-800 bg-slate-900/40 text-center py-16">
             <h3 className="text-lg font-semibold text-white capitalize">{activeTab} Section Active</h3>
             <p className="text-sm text-slate-400 mt-2 max-w-md mx-auto">

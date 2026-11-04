@@ -20,6 +20,52 @@ export class WhatsAppApiService {
   constructor(private readonly configService: ConfigService) {}
 
   /**
+   * Cleans credential values copied from dashboards or .env files.
+   * Strips wrapping quotes, an accidental "Bearer " prefix, and whitespace/newlines.
+   */
+  private sanitizeSecret(raw: string | undefined): string {
+    let value = (raw ?? '').trim();
+
+    if (value.length >= 2) {
+      const first = value[0];
+      const last = value[value.length - 1];
+      if (
+        (first === '"' && last === '"') ||
+        (first === "'" && last === "'")
+      ) {
+        value = value.slice(1, -1).trim();
+      }
+    }
+
+    value = value.replace(/^Bearer\s+/i, '').trim();
+    return value.replace(/\s+/g, '');
+  }
+
+  private normalizeApiUrl(raw: string | undefined): string {
+    return (raw || WHATSAPP_CONFIG.DEFAULT_GRAPH_API_BASE).trim().replace(/\/+$/, '');
+  }
+
+  /** Safe, non-revealing diagnostics used when Meta rejects a token. */
+  private describeCredential(raw: string | undefined): string {
+    const value = (raw ?? '').trim();
+    const quoted =
+      value.length >= 2 &&
+      ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")));
+    const bearerPrefix = /^Bearer\s+/i.test(value);
+    const containsWhitespace = /\s/.test(value);
+    return `length=${value.length}, quoted=${quoted}, bearerPrefix=${bearerPrefix}, whitespace=${containsWhitespace}`;
+  }
+
+  private simulatedDelivery(cleanTo: string): WhatsAppApiResponse {
+    return {
+      messaging_product: 'whatsapp',
+      contacts: [{ input: cleanTo, wa_id: cleanTo }],
+      messages: [{ id: `wamid.SIMULATED_${Date.now()}` }],
+    };
+  }
+
+  /**
    * Dispatches an outgoing text message or reply to the Meta WhatsApp Cloud API.
    *
    * @param to - Recipient phone number (normalized, e.g. "2348012345678").
@@ -125,9 +171,10 @@ export class WhatsAppApiService {
    * Internal helper to dispatch any prepared payload to Meta Cloud API.
    */
   private async dispatchPayload(cleanTo: string, payload: any): Promise<WhatsAppApiResponse> {
-    const accessToken = this.configService.get<string>('whatsapp.accessToken');
-    const phoneNumberId = this.configService.get<string>('whatsapp.phoneNumberId');
-    const apiUrl = this.configService.get<string>('whatsapp.apiUrl') || WHATSAPP_CONFIG.DEFAULT_GRAPH_API_BASE;
+    const rawAccessToken = this.configService.get<string>('whatsapp.accessToken');
+    const accessToken = this.sanitizeSecret(rawAccessToken);
+    const phoneNumberId = this.sanitizeSecret(this.configService.get<string>('whatsapp.phoneNumberId'));
+    const apiUrl = this.normalizeApiUrl(this.configService.get<string>('whatsapp.apiUrl'));
     const timeoutMs = this.configService.get<number>('whatsapp.apiTimeoutMs') || WHATSAPP_CONFIG.DEFAULT_TIMEOUT_MS;
     const isSimulated = this.configService.get<boolean>('isSimulated');
 
@@ -140,11 +187,7 @@ export class WhatsAppApiService {
 
     if (isSimulated && accessToken.startsWith('mock_')) {
       this.logger.log('[SIMULATED] Simulated interactive message delivered to ' + maskedTo);
-      return {
-        messaging_product: 'whatsapp',
-        contacts: [{ input: cleanTo, wa_id: cleanTo }],
-        messages: [{ id: 'wamid.SIMULATED_' + Date.now() }],
-      };
+      return this.simulatedDelivery(cleanTo);
     }
 
     const controller = new AbortController();
@@ -167,7 +210,29 @@ export class WhatsAppApiService {
 
       if (!response.ok) {
         const errorDetails = responseBody?.error?.message || response.statusText;
-        this.logger.warn('Meta API interactive dispatch error: ' + errorDetails);
+        const errorCode = responseBody?.error?.code;
+        this.logger.warn(
+          `Meta API interactive dispatch error (HTTP ${response.status}, Code: ${errorCode}): ${errorDetails}`,
+        );
+
+        if (response.status === 401) {
+          this.logger.error(
+            `WhatsApp credential diagnostics: ${this.describeCredential(rawAccessToken)}. ` +
+              'Temporary Meta tokens expire after ~24 hours; use a permanent System User token for production.',
+          );
+
+          if (isSimulated) {
+            this.logger.warn(
+              '[SIMULATED] Meta rejected the access token; returning a simulated delivery receipt because IS_SIMULATED=true.',
+            );
+            return this.simulatedDelivery(cleanTo);
+          }
+
+          throw new UnauthorizedException(
+            'WhatsApp Cloud API authentication failed. Verify WHATSAPP_ACCESS_TOKEN is a valid, unexpired System User token.',
+          );
+        }
+
         throw new BadRequestException('Meta WhatsApp API error: ' + errorDetails);
       }
 
@@ -183,9 +248,10 @@ export class WhatsAppApiService {
     text: string,
     replyToMessageId?: string,
   ): Promise<WhatsAppApiResponse> {
-    const accessToken = this.configService.get<string>('whatsapp.accessToken');
-    const phoneNumberId = this.configService.get<string>('whatsapp.phoneNumberId');
-    const apiUrl = this.configService.get<string>('whatsapp.apiUrl') || WHATSAPP_CONFIG.DEFAULT_GRAPH_API_BASE;
+    const rawAccessToken = this.configService.get<string>('whatsapp.accessToken');
+    const accessToken = this.sanitizeSecret(rawAccessToken);
+    const phoneNumberId = this.sanitizeSecret(this.configService.get<string>('whatsapp.phoneNumberId'));
+    const apiUrl = this.normalizeApiUrl(this.configService.get<string>('whatsapp.apiUrl'));
     const timeoutMs = this.configService.get<number>('whatsapp.apiTimeoutMs') || WHATSAPP_CONFIG.DEFAULT_TIMEOUT_MS;
     const isSimulated = this.configService.get<boolean>('isSimulated');
 
@@ -224,11 +290,7 @@ export class WhatsAppApiService {
     // If sandbox mode with mock credentials, simulate successful delivery receipt
     if (isSimulated && accessToken.startsWith('mock_')) {
       this.logger.log(`[SIMULATED] Simulated WhatsApp message successfully delivered to ${maskedTo}`);
-      return {
-        messaging_product: 'whatsapp',
-        contacts: [{ input: cleanTo, wa_id: cleanTo }],
-        messages: [{ id: `wamid.SIMULATED_${Date.now()}` }],
-      };
+      return this.simulatedDelivery(cleanTo);
     }
 
     const controller = new AbortController();
@@ -259,7 +321,21 @@ export class WhatsAppApiService {
         );
 
         if (response.status === 401) {
-          throw new UnauthorizedException('WhatsApp Cloud API authentication failed. Verify WHATSAPP_ACCESS_TOKEN.');
+          this.logger.error(
+            `WhatsApp credential diagnostics: ${this.describeCredential(rawAccessToken)}. ` +
+              'Temporary Meta tokens expire after ~24 hours; use a permanent System User token for production.',
+          );
+
+          if (isSimulated) {
+            this.logger.warn(
+              `[SIMULATED] Meta rejected the access token; returning a simulated delivery receipt to ${maskedTo} because IS_SIMULATED=true.`,
+            );
+            return this.simulatedDelivery(cleanTo);
+          }
+
+          throw new UnauthorizedException(
+            'WhatsApp Cloud API authentication failed. Verify WHATSAPP_ACCESS_TOKEN is a valid, unexpired System User token.',
+          );
         }
 
         if (response.status === 400) {
@@ -304,10 +380,9 @@ export class WhatsAppApiService {
   async downloadMedia(
     mediaId: string,
   ): Promise<{ buffer: Buffer; mimeType: string; fileSizeBytes: number }> {
-    const accessToken = this.configService.get<string>('whatsapp.accessToken');
-    const apiUrl =
-      this.configService.get<string>('whatsapp.apiUrl') ||
-      WHATSAPP_CONFIG.DEFAULT_GRAPH_API_BASE;
+    const rawAccessToken = this.configService.get<string>('whatsapp.accessToken');
+    const accessToken = this.sanitizeSecret(rawAccessToken);
+    const apiUrl = this.normalizeApiUrl(this.configService.get<string>('whatsapp.apiUrl'));
     const isSimulated = this.configService.get<boolean>('isSimulated');
 
     // In simulation / sandbox mode:
@@ -341,6 +416,18 @@ export class WhatsAppApiService {
       this.logger.error(
         `Failed to retrieve media metadata for ID ${mediaId}: HTTP ${metaResponse.status} - ${errText}`,
       );
+
+      if (metaResponse.status === 401 && isSimulated) {
+        this.logger.warn(
+          `[SIMULATED] Meta rejected the access token; returning simulated media for ID ${mediaId} because IS_SIMULATED=true.`,
+        );
+        return {
+          buffer: Buffer.from('simulated_audio_data_voice_note'),
+          mimeType: 'audio/ogg; codecs=opus',
+          fileSizeBytes: 32,
+        };
+      }
+
       throw new BadRequestException(
         `Could not retrieve media metadata from WhatsApp (HTTP ${metaResponse.status}).`,
       );

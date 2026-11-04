@@ -69,6 +69,29 @@ describe('WhatsAppApiService', () => {
       const result = await service.sendTextMessage('2348012345678', 'Hello');
       expect(result.contacts[0].input).toBe('2348012345678');
     });
+
+    it('simulates delivery when a mock token is wrapped in quotes', async () => {
+      const service = makeService({ ...baseConfig, 'whatsapp.accessToken': '"mock_dev_token"' });
+      const result = await service.sendTextMessage('2348012345678', 'Hello');
+      expect(result.messages[0].id).toMatch(/^wamid\.SIMULATED_/);
+      expect((global as any).fetch).not.toHaveBeenCalled();
+    });
+
+    it('falls back to simulated delivery on HTTP 401 when IS_SIMULATED=true', async () => {
+      (global as any).fetch = mockFetchResponse(
+        401,
+        { error: { message: 'Session has expired', code: 190 } },
+        false,
+      );
+      const service = makeService({
+        ...baseConfig,
+        isSimulated: true,
+        'whatsapp.accessToken': 'expired_live_token',
+      });
+
+      const result = await service.sendTextMessage('2348012345678', 'Hello');
+      expect(result.messages[0].id).toMatch(/^wamid\.SIMULATED_/);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -138,6 +161,26 @@ describe('WhatsAppApiService', () => {
       await expect(service.sendTextMessage('2348012345678', 'Hello')).rejects.toThrow(
         UnauthorizedException,
       );
+    });
+
+    it('strips quotes, Bearer prefix and whitespace from the access token', async () => {
+      const fetchMock = mockFetchResponse(200, {
+        messaging_product: 'whatsapp',
+        contacts: [{ input: '2348012345678', wa_id: '2348012345678' }],
+        messages: [{ id: 'wamid.OK' }],
+      });
+      (global as any).fetch = fetchMock;
+
+      const service = makeService({
+        ...baseConfig,
+        isSimulated: false,
+        'whatsapp.accessToken': '  "Bearer real_live_token"\n',
+      });
+
+      await service.sendTextMessage('2348012345678', 'Hello');
+
+      const init = (fetchMock as jest.Mock).mock.calls[0][1];
+      expect(init.headers.Authorization).toBe('Bearer real_live_token');
     });
 
     it('throws BadRequestException on HTTP 400', async () => {

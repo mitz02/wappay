@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AIModule } from '../artificial-intelligence/ai.module';
 import { VoiceModule } from '../voice/voice.module';
@@ -27,7 +27,13 @@ import { IncomingMessageHandler } from './handlers/incoming-message.handler';
  *   - WhatsApp Flows (registration, deposit) via WhatsAppFlowsModule
  */
 @Module({
-  imports: [ConfigModule, AIModule, VoiceModule, WhatsAppFlowsModule, WalletModule],
+  imports: [
+    ConfigModule,
+    forwardRef(() => AIModule),
+    VoiceModule,
+    forwardRef(() => WhatsAppFlowsModule),
+    WalletModule,
+  ],
   controllers: [WhatsAppWebhookController, MediaController],
   providers: [
     WhatsAppSignatureService,

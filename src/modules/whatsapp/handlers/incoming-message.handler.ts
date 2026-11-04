@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { WhatsAppMessageService } from '../services/whatsapp-message.service';
 import { WhatsAppApiService } from '../services/whatsapp-api.service';
@@ -28,6 +28,7 @@ export class IncomingMessageHandler {
   constructor(
     private readonly messageService: WhatsAppMessageService,
     private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => AIAssistantService))
     private readonly aiAssistantService: AIAssistantService,
     @Optional() private readonly voiceService?: VoiceService,
     @Optional() private readonly apiService?: WhatsAppApiService,

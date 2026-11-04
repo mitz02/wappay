@@ -22,7 +22,13 @@ import { WalletModule } from '../wallet/wallet.module';
  * - Deterministic intent & entity extractor (IntentParserService and AIService)
  */
 @Module({
-  imports: [ConfigModule, MockFinancialModule, GiftingModule, WhatsAppFlowsModule, WalletModule],
+  imports: [
+    ConfigModule,
+    MockFinancialModule,
+    GiftingModule,
+    forwardRef(() => WhatsAppFlowsModule),
+    WalletModule,
+  ],
   providers: [
     AIService,
     GroqService,

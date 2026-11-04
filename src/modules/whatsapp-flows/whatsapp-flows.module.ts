@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { FlowEndpointController } from './controllers/flow-endpoint.controller';
 import { FlowEncryptionService } from './services/flow-encryption.service';
 import { FlowSessionService } from './services/flow-session.service';
@@ -9,7 +9,7 @@ import { WalletModule } from '../wallet/wallet.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 
 @Module({
-  imports: [WalletModule, WhatsAppModule],
+  imports: [WalletModule, forwardRef(() => WhatsAppModule)],
   controllers: [FlowEndpointController],
   providers: [
     FlowEncryptionService,

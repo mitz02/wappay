@@ -11,11 +11,13 @@ import {
   AlertTriangle,
   Lock,
   Gift,
+  Smartphone,
 } from 'lucide-react';
 import { GiftingsView } from '@/components/giftings-view';
+import { WhatsAppSimulatorView } from '@/components/whatsapp-simulator-view';
 
 export default function AdminDashboardPage() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'customers' | 'giftings' | 'reconciliation' | 'audit'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'simulator' | 'transactions' | 'customers' | 'giftings' | 'reconciliation' | 'audit'>('overview');
   const [reconciliationRunning, setReconciliationRunning] = useState(false);
   const [reconciliationMessage, setReconciliationMessage] = useState<string | null>(null);
 
@@ -53,6 +55,21 @@ export default function AdminDashboardPage() {
               }`}
             >
               <Activity className="h-4 w-4" /> Overview
+            </button>
+            <button
+              onClick={() => setActiveTab('simulator')}
+              className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded-lg font-medium transition ${
+                activeTab === 'simulator'
+                  ? 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Smartphone className="h-4 w-4 text-indigo-400" /> WhatsApp Chat
+              </div>
+              <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-indigo-500/25 text-indigo-200 border border-indigo-500/30">
+                LIVE
+              </span>
             </button>
             <button
               onClick={() => setActiveTab('transactions')}
@@ -244,9 +261,11 @@ export default function AdminDashboardPage() {
           </div>
         )}
 
+        {activeTab === 'simulator' && <WhatsAppSimulatorView />}
+
         {activeTab === 'giftings' && <GiftingsView />}
 
-        {activeTab !== 'overview' && activeTab !== 'giftings' && (
+        {activeTab !== 'overview' && activeTab !== 'simulator' && activeTab !== 'giftings' && (
           <div className="p-8 rounded-xl border border-slate-800 bg-slate-900/40 text-center py-16">
             <h3 className="text-lg font-semibold text-white capitalize">{activeTab} Section Active</h3>
             <p className="text-sm text-slate-400 mt-2 max-w-md mx-auto">

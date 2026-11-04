@@ -16,6 +16,8 @@ import { AdminRole, TransactionState } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { ReconciliationService } from '../reconciliation/reconciliation.service';
 import { CustomersService } from '../customers/customers.service';
+import { AIAssistantService } from '../artificial-intelligence/services/ai-assistant.service';
+import { Optional } from '@nestjs/common';
 
 @Controller('admin')
 export class AdminController {
@@ -24,7 +26,40 @@ export class AdminController {
     private readonly prisma: PrismaService,
     private readonly reconciliationService: ReconciliationService,
     private readonly customersService: CustomersService,
+    @Optional() private readonly aiAssistantService?: AIAssistantService,
   ) {}
+
+  /**
+   * WhatsApp Chat Simulator Endpoint for Admin Sandbox Testing
+   */
+  @Post('simulator/message')
+  @HttpCode(HttpStatus.OK)
+  async simulateChatMessage(
+    @Body() body: { phone?: string; message: string; contactName?: string },
+  ) {
+    const phone = body.phone || '2348012345678';
+    const contactName = body.contactName || 'David Adeleke';
+
+    if (!this.aiAssistantService) {
+      return {
+        phone,
+        reply: `Mock reply: ${body.message}`,
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    const reply = await this.aiAssistantService.processCustomerMessage(
+      phone,
+      body.message,
+      contactName,
+    );
+
+    return {
+      phone,
+      reply,
+      timestamp: new Date().toISOString(),
+    };
+  }
 
   /**
    * Secure Administrator Login

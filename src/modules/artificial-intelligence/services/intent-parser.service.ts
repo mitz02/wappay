@@ -25,6 +25,7 @@ export interface ParsedFinancialIntent {
   transfers?: Array<{ amountKobo: bigint; recipient: string }>;
   network?: string;
   plan?: string;
+  hasExplicitPlan?: boolean;
   limit?: number;
   reference?: string;
   confirmationWord?: string;
@@ -213,12 +214,14 @@ export class IntentParserService {
       const textForAmount = plan ? raw.replace(new RegExp(plan.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), '') : raw;
       const amountKobo = this.extractMonetaryAmount(textForAmount) || 100_000n; // Default ₦1,000
       const network = this.extractNetwork(raw);
+      const hasExplicitPlan = Boolean(plan);
       return {
         intent: MockFinancialIntent.DATA_PURCHASE,
         confidence: 0.94,
         amountKobo,
-        network: network || 'MTN',
+        network: network || (hasExplicitPlan ? 'MTN' : undefined),
         plan: plan || '2GB',
+        hasExplicitPlan,
         rawText: raw,
       };
     }

@@ -303,6 +303,38 @@ describe('AIAssistantService', () => {
     expect(reply).toContain('Simulated Data Bundle Purchase Successful!');
   });
 
+  it('runs interactive data wizard from network selection to package purchase', async () => {
+    // 1. User asks for data without network or plan
+    const networkMenu = await service.processCustomerMessage('2348012345678', 'Buy data');
+    expect(networkMenu).toContain('SELECT DATA NETWORK');
+    expect(networkMenu).toContain('MTN');
+    expect(networkMenu).toContain('Airtel');
+
+    // 2. User selects network (MTN)
+    const plansMenu = await service.processCustomerMessage('2348012345678', 'MTN');
+    expect(plansMenu).toContain('SELECT DATA PLAN');
+    expect(plansMenu).toContain('MTN Nigeria');
+    expect(plansMenu).toContain('2.5GB');
+
+    // 3. User chooses 2.5GB plan
+    const receipt = await service.processCustomerMessage('2348012345678', '2.5GB');
+    expect(mockFinancialService.simulateDataPurchase).toHaveBeenCalledWith(
+      'cust-123',
+      '2348012345678',
+      'MTN',
+      '2.5GB',
+      60_000n,
+    );
+    expect(receipt).toContain('DATA RECHARGE SUCCESSFUL');
+    expect(receipt).toContain('MTN Nigeria');
+  });
+
+  it('cancels data purchase when user replies "cancel"', async () => {
+    await service.processCustomerMessage('2348012345678', 'I need data');
+    const cancelReply = await service.processCustomerMessage('2348012345678', 'cancel');
+    expect(cancelReply).toContain('Data Purchase Cancelled');
+  });
+
   // -------------------------------------------------------------------------
   // 9. Gift Shop Wizard
   // -------------------------------------------------------------------------
@@ -311,9 +343,9 @@ describe('AIAssistantService', () => {
     const reply = await service.processCustomerMessage('2348012345678', 'Gift');
 
     expect(reply).toContain('SELECT GIFT TO SEND');
-    expect(reply).toContain('MTN ₦500 Airtime');
-    expect(reply).toContain('Airtel ₦2,000 Airtime');
-    expect(reply).toContain('₦5,000 Cash Gift');
+    expect(reply).toContain('Starter Airtime');
+    expect(reply).toContain('Deluxe Airtime');
+    expect(reply).toContain('Starter Money');
   });
 
   it('completes a gift end-to-end after number, recipient, and SEND', async () => {
@@ -321,13 +353,16 @@ describe('AIAssistantService', () => {
     expect(menu).toContain('SELECT GIFT TO SEND');
 
     const recipientPrompt = await service.processCustomerMessage('2348012345678', '3');
-    expect(recipientPrompt).toContain('MTN ₦2,000 Airtime');
-    expect(recipientPrompt).toContain('Who is this gift for?');
+    expect(recipientPrompt).toContain('Elite Airtime');
+    expect(recipientPrompt).toContain('Who is this for');
 
-    const summary = await service.processCustomerMessage(
+    const senderPrompt = await service.processCustomerMessage(
       '2348012345678',
       '08098765432 Happy Birthday',
     );
+    expect(senderPrompt).toContain('Who is this gift from?');
+
+    const summary = await service.processCustomerMessage('2348012345678', '1');
     expect(summary).toContain('Gift Summary');
     expect(summary).toContain('2348098765432');
     expect(summary).toContain('Happy Birthday');
@@ -337,12 +372,12 @@ describe('AIAssistantService', () => {
       'cust-123',
       'AIRTIME',
       '2348098765432',
-      200_000n,
-      'MTN',
+      1_000_000n,
+      undefined,
       undefined,
       'Happy Birthday',
     );
-    expect(receipt).toContain('GIFT SENT!');
+    expect(receipt).toContain('GIFT CREATED!');
     expect(receipt).toContain('MOCK_GFT_001');
   });
 
@@ -350,9 +385,12 @@ describe('AIAssistantService', () => {
     await service.processCustomerMessage('2348012345678', 'Gift shop');
 
     const prompt = await service.processCustomerMessage('2348012345678', 'GIFT_9');
-    expect(prompt).toContain('₦5,000 Cash Gift');
+    expect(prompt).toContain('Elite Money');
 
-    const summary = await service.processCustomerMessage('2348012345678', 'me');
+    const senderPrompt = await service.processCustomerMessage('2348012345678', 'me');
+    expect(senderPrompt).toContain('Who is this gift from?');
+
+    const summary = await service.processCustomerMessage('2348012345678', '1');
     expect(summary).toContain('2348012345678');
 
     const receipt = await service.processCustomerMessage('2348012345678', 'send');
@@ -360,19 +398,19 @@ describe('AIAssistantService', () => {
       'cust-123',
       'CASH',
       '2348012345678',
-      500_000n,
+      1_000_000n,
       undefined,
       undefined,
-      'A little something for you 🎁',
+      'A little something to make you smile 🎁',
     );
-    expect(receipt).toContain('GIFT SENT!');
+    expect(receipt).toContain('GIFT CREATED!');
   });
 
   it('recovers an interactive gift selection after a cold start', async () => {
     const prompt = await service.processCustomerMessage('2348012345678', 'GIFT_6');
 
-    expect(prompt).toContain('MTN ₦1,000 1.5GB Data');
-    expect(prompt).toContain('Who is this gift for?');
+    expect(prompt).toContain('Elite Data');
+    expect(prompt).toContain('Who is this for');
   });
 
   it('cancels an in-progress gift without debiting funds', async () => {

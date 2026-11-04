@@ -10,6 +10,7 @@ async function bootstrap() {
 
   // CRITICAL FOR META SIGNATURE VERIFICATION: Enable rawBody capture
   const app = await NestFactory.create(AppModule, { rawBody: true });
+  app.enableCors();
 
   const configService = app.get(ConfigService);
   const port = configService.get<number>('port') || 3000;

@@ -14,6 +14,7 @@ import {
   GIFT_CATALOG,
   GIFT_KINDS,
 } from '../../gifting/gift.constants';
+import { DATA_PACKAGES } from '../../artificial-intelligence/data.constants';
 
 @Injectable()
 export class IncomingMessageHandler {
@@ -208,6 +209,58 @@ export class IncomingMessageHandler {
             },
           ],
           '⚡ Select Package',
+          'WAPPay Instant Banking',
+          message.id,
+        ).catch(async () => {
+          await this.messageService.sendReply(normalizedPhone, replyText, message.id);
+        });
+      } else if (replyText.includes('SELECT DATA NETWORK')) {
+        await this.messageService.sendInteractiveList(
+          normalizedPhone,
+          '🌐 *Instant Mobile Internet Data Top-Up*\nPlease choose your mobile network provider below:',
+          'Select Network',
+          [
+            {
+              title: 'Mobile Networks',
+              rows: [
+                { id: 'MTN', title: '🟡 MTN Nigeria', description: 'Instant 4G/5G • 3% Cashback' },
+                { id: 'AIRTEL', title: '🔴 Airtel Nigeria', description: 'Smart Speed • 3% Cashback' },
+                { id: 'GLO', title: '🟢 Glo Nigeria', description: 'Unlimited Grand • 3% Cashback' },
+                { id: '9MOBILE', title: '🟢 9mobile', description: 'Super Fast • 3% Cashback' },
+              ],
+            },
+          ],
+          '🌐 Data Top-Up',
+          'WAPPay Instant Banking',
+          message.id,
+        ).catch(async () => {
+          await this.messageService.sendReply(normalizedPhone, replyText, message.id);
+        });
+      } else if (replyText.includes('SELECT DATA PLAN')) {
+        const net = replyText.includes('Airtel')
+          ? 'AIRTEL'
+          : replyText.includes('Glo')
+          ? 'GLO'
+          : replyText.includes('9mobile')
+          ? '9MOBILE'
+          : 'MTN';
+        const packages = DATA_PACKAGES[net] || DATA_PACKAGES.MTN;
+
+        await this.messageService.sendInteractiveList(
+          normalizedPhone,
+          `Choose a ${net} data bundle below:`,
+          'Select Plan',
+          [
+            {
+              title: `${net} Data Bundles`,
+              rows: packages.map((pkg) => ({
+                id: pkg.plan,
+                title: `${pkg.plan} (${pkg.validity})`,
+                description: `₦${pkg.priceNaira.toLocaleString()} • 3% Cashback`,
+              })),
+            },
+          ],
+          '⚡ Select Data',
           'WAPPay Instant Banking',
           message.id,
         ).catch(async () => {

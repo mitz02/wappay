@@ -24,6 +24,8 @@ import {
   Banknote,
   Cake,
   PartyPopper,
+  ExternalLink,
+  Link2,
 } from 'lucide-react';
 
 type GiftType = 'Airtime' | 'Data' | 'Cash';
@@ -194,6 +196,7 @@ const TONE_STYLES: Record<string, string> = {
 };
 
 const AMOUNT_PRESETS = [500, 1000, 2000, 5000];
+const SHORT_GIFT_LINK = 'wappay.ng/g/7KQ2P';
 
 function formatNaira(amount: number): string {
   return `₦${amount.toLocaleString('en-NG', {
@@ -669,12 +672,32 @@ export function GiftingsView() {
               </button>
 
               {sent && (
-                <div className="flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-300">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0" />
-                  <span>
-                    Gift queued for delivery. The recipient will receive a WhatsApp notification with
-                    the gift and your message.
-                  </span>
+                <div className="overflow-hidden rounded-2xl border border-emerald-400/30 bg-[#10251f] shadow-xl shadow-emerald-950/20">
+                  <div className="flex items-center gap-2 border-b border-emerald-400/15 bg-emerald-400/10 px-4 py-3 text-xs font-semibold text-emerald-300">
+                    <CheckCircle2 className="h-4 w-4" /> WhatsApp message ready to send
+                  </div>
+                  <div className="p-4">
+                    <div className="rounded-xl rounded-tl-sm bg-white p-4 text-slate-900 shadow-sm">
+                      <p className="text-sm font-semibold leading-6">
+                        You received a gift from <span className="text-emerald-700">WAPPay</span>.
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">
+                        Tap below to view your message and claim your gift.
+                      </p>
+                      <a
+                        href={`/gift/${SHORT_GIFT_LINK.split('/').at(-1)}`}
+                        className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-700"
+                      >
+                        View gift &amp; claim <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                      <div className="mt-3 flex items-center gap-1.5 border-t border-slate-100 pt-3 text-[11px] text-slate-400">
+                        <Link2 className="h-3 w-3" /> {SHORT_GIFT_LINK}
+                      </div>
+                    </div>
+                    <p className="mt-3 text-center text-[10px] font-medium uppercase tracking-[0.18em] text-emerald-300/70">
+                      Powered by WAPPay
+                    </p>
+                  </div>
                 </div>
               )}
 

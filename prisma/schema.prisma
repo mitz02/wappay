@@ -142,6 +142,7 @@ model CustomerProfile {
   user               User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   fullName           String
   whatsappNumber     String         @unique
+  email              String?
   status             CustomerStatus @default(PENDING_VERIFICATION)
   kycTier            KycTier        @default(TIER_1)
   pinHash            String?        // Argon2id hash of transaction PIN
@@ -149,6 +150,11 @@ model CustomerProfile {
   pinLockedUntil     DateTime?
   dailyLimitKobo     BigInt         @default(50000000) // Default 500,000 NGN in Kobo
   accountReference   String?        @unique            // Dedicated virtual account number
+  // Registration & KYC
+  identityType       String?        // "NIN" | "BVN"
+  identityNumber     String?        // 11-digit NIN or BVN (masked at rest in responses)
+  isIdentityVerified Boolean        @default(false)
+  registeredAt       DateTime?
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
 

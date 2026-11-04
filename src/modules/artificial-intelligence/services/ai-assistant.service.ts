@@ -244,6 +244,30 @@ export class AIAssistantService {
           break;
         }
 
+        // --- C2. Registration ---
+        case MockFinancialIntent.REGISTER: {
+          this.pendingAirtimeSessions.delete(customer.id);
+          this.pendingDataSessions.delete(customer.id);
+          this.pendingGiftSessions.delete(customer.id);
+
+          const baseUrl =
+            process.env.PUBLIC_APP_URL || 'https://wappay-ten.vercel.app';
+          const registerUrl = `${baseUrl}/register?phone=${encodeURIComponent(
+            customer.whatsappNumber ?? normalizedPhone,
+          )}`;
+
+          reply =
+            `🔐 *WAPPay Registration*\n\n` +
+            `Tap the secure link below to create your account — it only takes a minute:\n\n` +
+            `👉 ${registerUrl}\n\n` +
+            `You'll need:\n` +
+            `• Your full name\n` +
+            `• NIN *or* BVN (11 digits)\n` +
+            `• A 4-digit transaction PIN\n\n` +
+            `_Already registered? Just say *balance* to check your account._`;
+          break;
+        }
+
         // --- D. Balance Enquiry ---
         case MockFinancialIntent.BALANCE_ENQUIRY: {
           const balance = await this.mockFinancialService.getBalance(customer.id);

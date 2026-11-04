@@ -18,6 +18,7 @@ import { ReconciliationModule } from './modules/reconciliation/reconciliation.mo
 import { AdminModule } from './modules/administrators/admin.module';
 import { MockFinancialModule } from './modules/mock-financial/mock-financial.module';
 import { GiftingModule } from './modules/gifting/gifting.module';
+import { RegistrationModule } from './modules/registration/registration.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { GiftingModule } from './modules/gifting/gifting.module';
     ReconciliationModule,
     AdminModule,
     GiftingModule,
+    RegistrationModule,
   ],
 })
 export class AppModule {}

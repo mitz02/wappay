@@ -11,6 +11,7 @@ export enum MockFinancialIntent {
   DEPOSIT = 'DEPOSIT',
   LIST_RECIPIENTS = 'LIST_RECIPIENTS',
   GIFTING = 'GIFTING',
+  REGISTER = 'REGISTER',
   CONFIRM_TRANSACTION = 'CONFIRM_TRANSACTION',
   CANCEL_TRANSACTION = 'CANCEL_TRANSACTION',
   HELP = 'HELP',
@@ -74,6 +75,24 @@ export class IntentParserService {
       return {
         intent: MockFinancialIntent.GIFTING,
         confidence: 0.96,
+        rawText: raw,
+      };
+    }
+
+    // 3b. Registration — before deposit/balance so "register" never falls through to GENERAL
+    if (
+      /^(?:register|registration|sign\s*up|signup|create\s*(?:an?\s*)?account|open\s*(?:an?\s*)?account|i\s*want\s*to\s*register|want\s*to\s*register|how\s*to\s*register|register\s*me)$/i.test(
+        lower,
+      ) ||
+      lower.includes('i want to register') ||
+      lower.includes('want to register') ||
+      lower.includes('sign up') ||
+      lower.includes('create account') ||
+      lower.includes('open account')
+    ) {
+      return {
+        intent: MockFinancialIntent.REGISTER,
+        confidence: 0.97,
         rawText: raw,
       };
     }

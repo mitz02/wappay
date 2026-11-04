@@ -28,6 +28,8 @@ async function createHandler() {
       'gift/(.*)',
       'media',
       'media/(.*)',
+      'register',
+      'register/(.*)',
     ],
   });
   app.useGlobalPipes(

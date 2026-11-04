@@ -26,6 +26,8 @@ async function bootstrap() {
       'gift/(.*)',
       'media',
       'media/(.*)',
+      'register',
+      'register/(.*)',
     ],
   });
 

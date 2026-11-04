@@ -6,6 +6,7 @@ import { ConversationHistoryService } from './services/conversation-history.serv
 import { AIAssistantService } from './services/ai-assistant.service';
 import { IntentParserService } from './services/intent-parser.service';
 import { MockFinancialModule } from '../mock-financial/mock-financial.module';
+import { GiftingModule } from '../gifting/gifting.module';
 
 /**
  * AIModule
@@ -19,7 +20,7 @@ import { MockFinancialModule } from '../mock-financial/mock-financial.module';
  * - Deterministic intent & entity extractor (IntentParserService and AIService)
  */
 @Module({
-  imports: [ConfigModule, MockFinancialModule],
+  imports: [ConfigModule, MockFinancialModule, GiftingModule],
   providers: [
     AIService,
     GroqService,

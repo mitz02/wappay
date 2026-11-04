@@ -21,7 +21,7 @@ async function createHandler() {
   const prefix = configService.get<string>('apiPrefix') || 'api/v1';
 
   app.setGlobalPrefix(prefix, {
-    exclude: ['webhooks/whatsapp', 'webhooks/whatsapp/(.*)'],
+    exclude: ['webhooks/whatsapp', 'webhooks/whatsapp/(.*)', 'gift', 'gift/(.*)'],
   });
   app.useGlobalPipes(
     new ValidationPipe({

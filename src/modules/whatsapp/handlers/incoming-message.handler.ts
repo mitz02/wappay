@@ -10,7 +10,10 @@ import {
 } from '../whatsapp.constants';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import { AIAssistantService } from '../../artificial-intelligence/services/ai-assistant.service';
-import { GIFT_CATALOG } from '../../artificial-intelligence/gift.constants';
+import {
+  GIFT_CATALOG,
+  GIFT_KINDS,
+} from '../../gifting/gift.constants';
 
 @Injectable()
 export class IncomingMessageHandler {
@@ -150,16 +153,16 @@ export class IncomingMessageHandler {
           normalizedPhone,
           'Choose a gift to send to someone special:',
           'Select Gift',
-          [
-            {
-              title: 'WAPPay Gift Shop',
-              rows: GIFT_CATALOG.map((gift) => ({
+          (['AIRTIME', 'DATA', 'MONEY'] as const).map((kind) => ({
+            title: GIFT_KINDS[kind].sectionTitle,
+            rows: GIFT_CATALOG.filter((gift) => gift.kind === kind).map(
+              (gift) => ({
                 id: gift.id,
                 title: gift.name,
                 description: gift.description,
-              })),
-            },
-          ],
+              }),
+            ),
+          })),
           '🎁 Gift Shop',
           'WAPPay Instant Banking',
           message.id,

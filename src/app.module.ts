@@ -17,6 +17,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
 import { AdminModule } from './modules/administrators/admin.module';
 import { MockFinancialModule } from './modules/mock-financial/mock-financial.module';
+import { GiftingModule } from './modules/gifting/gifting.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { MockFinancialModule } from './modules/mock-financial/mock-financial.mod
     WhatsAppModule,
     ReconciliationModule,
     AdminModule,
+    GiftingModule,
   ],
 })
 export class AppModule {}

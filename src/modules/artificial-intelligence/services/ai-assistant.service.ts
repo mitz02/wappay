@@ -8,14 +8,22 @@ import { IntentParserService, MockFinancialIntent } from './intent-parser.servic
 import { MockFinancialService } from '../../mock-financial/services/mock-financial.service';
 import { WAPPAY_SYSTEM_PROMPT, AI_CONSTANTS } from '../ai.constants';
 import { formatKoboToNaira } from '../../../common/types';
-import { GIFT_CATALOG, GiftCatalogItem } from '../gift.constants';
+import {
+  GIFT_CATALOG,
+  GIFT_KINDS,
+  GiftCatalogItem,
+  resolveGiftCatalogItem,
+} from '../../gifting/gift.constants';
+import { GiftService } from '../../gifting/gift.service';
 import { MockGiftResult } from '../../mock-financial/interfaces/mock-financial.interface';
 
 interface PendingGiftSession {
-  stage: 'SELECT_GIFT' | 'SELECT_RECIPIENT' | 'CONFIRM';
+  stage: 'SELECT_GIFT' | 'DETAILS' | 'SENDER' | 'CONFIRM';
   gift?: GiftCatalogItem;
   recipientPhone?: string;
   message?: string;
+  senderName?: string;
+  anonymous?: boolean;
 }
 
 @Injectable()
@@ -29,6 +37,7 @@ export class AIAssistantService {
     private readonly historyService: ConversationHistoryService,
     private readonly intentParser: IntentParserService,
     private readonly mockFinancialService: MockFinancialService,
+    private readonly giftService: GiftService,
   ) {}
 
   /**
@@ -70,7 +79,7 @@ export class AIAssistantService {
 
     // Recover an interactive gift selection if the in-memory session was lost
     // (for example, after a serverless cold start).
-    if (/^GIFT_[1-9]$/i.test(trimmedMessage)) {
+    if (/^(?:GIFT_[ADM][1-9]|GIFT_[1-9])$/i.test(trimmedMessage)) {
       const recovered: PendingGiftSession = { stage: 'SELECT_GIFT' };
       this.pendingGiftSessions.set(customer.id, recovered);
       return await this.continueGiftSession(
@@ -564,17 +573,17 @@ export class AIAssistantService {
 
     switch (session.stage) {
       case 'SELECT_GIFT': {
-        const gift = this.resolveGiftChoice(input);
+        const gift = resolveGiftCatalogItem(input);
         if (!gift) {
           return `${this.buildGiftMenu()}\n\n⚠️ *Please choose a gift between 1 and 9.*`;
         }
         session.gift = gift;
-        session.stage = 'SELECT_RECIPIENT';
+        session.stage = 'DETAILS';
         this.pendingGiftSessions.set(customer.id, session);
-        return this.buildGiftRecipientPrompt(gift);
+        return this.buildGiftDetailsPrompt(gift);
       }
 
-      case 'SELECT_RECIPIENT': {
+      case 'DETAILS': {
         const selfGift = /\b(me|myself|self)\b/i.test(input);
         const recipientPhone = selfGift
           ? normalizedPhone
@@ -583,15 +592,24 @@ export class AIAssistantService {
         if (!recipientPhone) {
           return (
             `⚠️ *Recipient Needed*\n\n` +
-            `Reply with a valid Nigerian WhatsApp number, for example:\n` +
-            `_08012345678 Happy Birthday!_\n\n` +
+            `Reply with a valid Nigerian WhatsApp number followed by your romantic message:\n` +
+            `_08012345678 You make my world brighter ✨_\n\n` +
             `Or reply *me* to gift yourself.\n` +
             `_Type "cancel" to exit._`
           );
         }
 
         session.recipientPhone = recipientPhone;
-        session.message = this.extractGiftNote(input, selfGift);
+        session.message = this.extractGiftMessage(input, selfGift);
+        session.stage = 'SENDER';
+        this.pendingGiftSessions.set(customer.id, session);
+        return this.buildGiftSenderPrompt(customer, session);
+      }
+
+      case 'SENDER': {
+        const sender = this.resolveGiftSender(input, customer.fullName);
+        session.senderName = sender.name;
+        session.anonymous = sender.anonymous;
         session.stage = 'CONFIRM';
         this.pendingGiftSessions.set(customer.id, session);
         return this.buildGiftConfirmation(session);
@@ -602,7 +620,7 @@ export class AIAssistantService {
           this.pendingGiftSessions.delete(customer.id);
           return await this.executeGift(customer, session);
         }
-        return '👉 Reply *SEND* to confirm the gift or *CANCEL* to abort.';
+        return '👉 Reply *SEND* to create this gift or *CANCEL* to abort.';
       }
     }
 
@@ -621,11 +639,25 @@ export class AIAssistantService {
         gift.kind,
         session.recipientPhone!,
         gift.amountKobo,
-        gift.network,
+        undefined,
         gift.plan,
         session.message,
       );
-      return this.buildGiftReceipt(gift, result);
+
+      const link = this.giftService.createGiftLink({
+        id: result.transactionId,
+        reference: result.reference,
+        kind: gift.kind,
+        name: gift.name,
+        amountKobo: gift.amountKobo,
+        message: session.message || 'A little something to make you smile 🎁',
+        senderName: session.senderName || customer.fullName,
+        anonymous: session.anonymous || false,
+        recipientPhone: session.recipientPhone!,
+        plan: gift.plan,
+      });
+
+      return this.buildGiftReceipt(gift, result, link.url, session);
     } catch (err: any) {
       this.logger.warn(
         `Gift simulation failed for customer ${customer.id}: ${err.message}`,
@@ -641,27 +673,53 @@ export class AIAssistantService {
   }
 
   private buildGiftMenu(): string {
-    const lines = GIFT_CATALOG.map((gift, idx) => `[${idx + 1}] ${gift.name}`);
+    const groups = (['AIRTIME', 'DATA', 'MONEY'] as const)
+      .map((kind) => {
+        const meta = GIFT_KINDS[kind];
+        const rows = GIFT_CATALOG.map((gift, idx) => ({ gift, idx }))
+          .filter(({ gift }) => gift.kind === kind)
+          .map(
+            ({ gift, idx }) =>
+              `[${idx + 1}] ${gift.name} — ${formatKoboToNaira(gift.amountKobo)}`,
+          )
+          .join('\n');
+        return `${meta.emoji} *${meta.label.toUpperCase()}*\n${rows}`;
+      })
+      .join('\n\n');
 
     return (
       `╔═══════════════════════════════════════╗\n` +
       `║          🎁 SELECT GIFT TO SEND       ║\n` +
       `╚═══════════════════════════════════════╝\n\n` +
-      `Send a little something to someone special over WhatsApp.\n\n` +
-      `${lines.join('\n')}\n\n` +
+      `Choose a tier. Every gift includes a personal message and a claim link.\n\n` +
+      `${groups}\n\n` +
       `👉 *Reply with 1-9 or tap the list below.*\n` +
       `_Type "cancel" to exit._`
     );
   }
 
-  private buildGiftRecipientPrompt(gift: GiftCatalogItem): string {
+  private buildGiftDetailsPrompt(gift: GiftCatalogItem): string {
     return (
-      `🎁 *${gift.name}*\n\n` +
-      `Who is this gift for?\n\n` +
-      `Reply with the recipient's WhatsApp number and an optional note:\n` +
-      `_08012345678 Happy Birthday!_\n\n` +
+      `🎁 *${gift.name}* • *${formatKoboToNaira(gift.amountKobo)}*\n\n` +
+      `Who is this for, and what's your romantic message?\n\n` +
+      `Reply with their WhatsApp number followed by your note:\n` +
+      `_08012345678 You make my world brighter ✨_\n\n` +
       `Or reply *me* to gift yourself.\n` +
       `_Type "cancel" to exit._`
+    );
+  }
+
+  private buildGiftSenderPrompt(
+    customer: any,
+    session: PendingGiftSession,
+  ): string {
+    return (
+      `💌 *Message saved!*\n\n` +
+      `"${session.message}"\n\n` +
+      `Who is this gift from?\n\n` +
+      `1️⃣ ${customer.fullName}\n` +
+      `2️⃣ Anonymous\n\n` +
+      `Reply *1*, *2*, or type a custom display name.`
     );
   }
 
@@ -670,70 +728,75 @@ export class AIAssistantService {
 
     return (
       `🎁 *Gift Summary*\n\n` +
-      `• *Gift:* ${gift.name}\n` +
-      `• *Recipient:* \`${session.recipientPhone}\`\n` +
-      `• *Note:* ${session.message}\n` +
-      `• *Amount:* *${formatKoboToNaira(gift.amountKobo)}*\n\n` +
-      `Reply *SEND* to confirm or *CANCEL* to abort.`
+      `• *Gift:* ${gift.name} (${gift.tier})\n` +
+      `• *Value:* *${formatKoboToNaira(gift.amountKobo)}*\n` +
+      `• *For:* \`${session.recipientPhone}\`\n` +
+      `• *Message:* "${session.message}"\n` +
+      `• *From:* ${session.anonymous ? 'Anonymous' : session.senderName}\n\n` +
+      `Reply *SEND* to create this gift or *CANCEL* to abort.`
     );
   }
 
   private buildGiftReceipt(
     gift: GiftCatalogItem,
     result: MockGiftResult,
+    url: string,
+    session: PendingGiftSession,
   ): string {
     return (
       `╔═══════════════════════════════════════╗\n` +
-      `║             🎁 GIFT SENT!             ║\n` +
+      `║          🎁 GIFT CREATED!             ║\n` +
       `╚═══════════════════════════════════════╝\n\n` +
-      `✅ *Your gift is on its way!*\n\n` +
-      `📋 *Gift Receipt:*\n` +
-      `• 🎁 *Gift:* ${gift.name}\n` +
-      `• 📱 *Recipient:* \`${result.recipientPhone}\`\n` +
-      `• 💬 *Note:* ${result.note || 'A little something for you 🎁'}\n` +
-      `• 💸 *Amount Debited:* *${formatKoboToNaira(result.amountDebitedKobo)}*\n` +
-      `• 🔖 *Reference:* \`${result.reference}\`\n\n` +
-      `💳 *New Available Balance:* *${formatKoboToNaira(result.newBalanceKobo)}*\n` +
+      `Your *${gift.name}* gift is ready to claim.\n\n` +
+      `💌 "${session.message}"\n` +
+      `👤 From: *${session.anonymous ? 'Anonymous' : session.senderName}*\n` +
+      `📱 For: \`${result.recipientPhone}\`\n\n` +
+      `🔗 *Claim link:*\n${url}\n\n` +
+      `💸 *Amount Debited:* *${formatKoboToNaira(result.amountDebitedKobo)}*\n` +
+      `🔖 *Reference:* \`${result.reference}\`\n` +
+      `💳 *New Balance:* *${formatKoboToNaira(result.newBalanceKobo)}*\n` +
       `═══════════════════════════════════════\n` +
-      `_Simulated gift delivered on WAPPay mock rails._`
+      `_Test mode: the link was sent back to you instead of the recipient. Share it with them to claim._`
     );
   }
 
-  private resolveGiftChoice(input: string): GiftCatalogItem | undefined {
-    const raw = input.trim().toLowerCase();
+  private resolveGiftSender(
+    input: string,
+    customerName: string,
+  ): { name: string; anonymous: boolean } {
+    const raw = input.trim();
+    const lower = raw.toLowerCase();
 
-    const byId = GIFT_CATALOG.find((gift) => gift.id.toLowerCase() === raw);
-    if (byId) {
-      return byId;
+    if (
+      ['1', 'me', 'my name', 'named', customerName.toLowerCase()].includes(
+        lower,
+      )
+    ) {
+      return { name: customerName, anonymous: false };
     }
-
-    const indexMatch = raw.match(/^(?:gift[_ -]?)?([1-9])$/);
-    if (indexMatch) {
-      return GIFT_CATALOG[Number(indexMatch[1]) - 1];
+    if (
+      ['2', 'anonymous', 'anon', 'secret', 'secret admirer'].includes(lower)
+    ) {
+      return { name: 'Anonymous', anonymous: true };
     }
-
-    return GIFT_CATALOG.find(
-      (gift) =>
-        gift.name.toLowerCase() === raw ||
-        gift.name.toLowerCase().includes(raw),
-    );
+    return { name: raw.slice(0, 60) || customerName, anonymous: false };
   }
 
-  private extractGiftNote(input: string, selfGift: boolean): string {
+  private extractGiftMessage(input: string, selfGift: boolean): string {
     const phoneMatch = input.match(/\b(0[789][01]\d{8}|234[789][01]\d{8})\b/);
-    let note = phoneMatch ? input.replace(phoneMatch[0], ' ') : input;
+    let message = phoneMatch ? input.replace(phoneMatch[0], ' ') : input;
 
     if (selfGift) {
-      note = note.replace(/\b(me|myself|self)\b/gi, ' ');
+      message = message.replace(/\b(me|myself|self)\b/gi, ' ');
     }
-    note = note.replace(/^\s*(?:to|for)\s+/i, ' ');
-    note = note.replace(/^[\s\-–—:,.]+/, '').trim();
+    message = message.replace(/^\s*(?:to|for)\s+/i, ' ');
+    message = message.replace(/^[\s\-–—:,.]+/, '').trim();
 
-    if (!note) {
-      return 'A little something for you 🎁';
+    if (!message) {
+      return 'A little something to make you smile 🎁';
     }
 
-    return note.slice(0, 120);
+    return message.slice(0, 240);
   }
 
   private resolveNetworkChoice(input: string): string | undefined {

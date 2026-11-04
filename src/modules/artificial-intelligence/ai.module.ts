@@ -7,6 +7,8 @@ import { AIAssistantService } from './services/ai-assistant.service';
 import { IntentParserService } from './services/intent-parser.service';
 import { MockFinancialModule } from '../mock-financial/mock-financial.module';
 import { GiftingModule } from '../gifting/gifting.module';
+import { WhatsAppFlowsModule } from '../whatsapp-flows/whatsapp-flows.module';
+import { WalletModule } from '../wallet/wallet.module';
 
 /**
  * AIModule
@@ -20,7 +22,7 @@ import { GiftingModule } from '../gifting/gifting.module';
  * - Deterministic intent & entity extractor (IntentParserService and AIService)
  */
 @Module({
-  imports: [ConfigModule, MockFinancialModule, GiftingModule],
+  imports: [ConfigModule, MockFinancialModule, GiftingModule, WhatsAppFlowsModule, WalletModule],
   providers: [
     AIService,
     GroqService,

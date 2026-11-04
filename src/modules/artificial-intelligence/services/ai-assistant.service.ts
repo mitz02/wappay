@@ -17,6 +17,11 @@ import {
 import { GiftService } from '../../gifting/gift.service';
 import { MockGiftResult } from '../../mock-financial/interfaces/mock-financial.interface';
 import { DATA_PACKAGES, DataPackage } from '../data.constants';
+import { withBrand, formatNaira } from '../../whatsapp-flows/utils/brand';
+import { FlowSessionService } from '../../whatsapp-flows/services/flow-session.service';
+import { FlowSenderService } from '../../whatsapp-flows/services/flow-sender.service';
+import { WalletService } from '../../wallet/wallet.service';
+import { PrismaService } from '../../../infrastructure/database/prisma.service';
 
 interface PendingGiftSession {
   stage: 'SELECT_GIFT' | 'DETAILS' | 'SENDER' | 'CONFIRM';
@@ -48,6 +53,10 @@ export class AIAssistantService {
     private readonly intentParser: IntentParserService,
     private readonly mockFinancialService: MockFinancialService,
     @Optional() private readonly giftService?: GiftService,
+    @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly flowSessionService?: FlowSessionService,
+    @Optional() private readonly flowSenderService?: FlowSenderService,
+    @Optional() private readonly walletService?: WalletService,
   ) {}
 
   /**
@@ -75,8 +84,27 @@ export class AIAssistantService {
       contactName,
     );
 
-    // 2. Check for an active multi-step Gift Wizard session
+    // 2. Handle interactive button/list selections for wallet operations
     const lowerInput = trimmedMessage.toLowerCase();
+
+    // Wallet menu selections
+    if (['my_wallet', 'wallet', 'MY_WALLET'].includes(trimmedMessage) || lowerInput === 'my wallet') {
+      return await this.handleMyWallet(customer, normalizedPhone);
+    }
+    if (['deposit_money', 'DEPOSIT_MONEY', 'deposit money', 'deposit'].includes(trimmedMessage) || lowerInput === 'deposit money' || lowerInput === 'deposit') {
+      return await this.handleDepositMoney(customer, normalizedPhone);
+    }
+    if (['transaction_history', 'TRANSACTION_HISTORY', 'transaction history', 'history', 'transactions'].includes(trimmedMessage) || lowerInput === 'transaction history' || lowerInput === 'history' || lowerInput === 'transactions') {
+      return await this.handleTransactionHistory(customer, normalizedPhone);
+    }
+    if (['main_menu', 'MAIN_MENU', 'main menu', 'menu', 'start', 'home'].includes(trimmedMessage) || lowerInput === 'main menu' || lowerInput === 'menu' || lowerInput === 'start' || lowerInput === 'home') {
+      return await this.handleMainMenu(customer, normalizedPhone);
+    }
+    if (['my_account', 'MY_ACCOUNT', 'my account', 'account', 'profile'].includes(trimmedMessage) || lowerInput === 'my account' || lowerInput === 'account' || lowerInput === 'profile') {
+      return await this.handleMyAccount(customer, normalizedPhone);
+    }
+
+    // 3. Check for an active multi-step Gift Wizard session
     const giftSession = this.pendingGiftSessions.get(customer.id);
     if (giftSession) {
       return await this.continueGiftSession(
@@ -250,21 +278,68 @@ export class AIAssistantService {
           this.pendingDataSessions.delete(customer.id);
           this.pendingGiftSessions.delete(customer.id);
 
-          const baseUrl =
-            process.env.PUBLIC_APP_URL || 'https://wappay-ten.vercel.app';
-          const registerUrl = `${baseUrl}/register?phone=${encodeURIComponent(
-            customer.whatsappNumber ?? normalizedPhone,
-          )}`;
+          // Check if already registered
+          const profile = this.prisma
+            ? await this.prisma.customerProfile.findFirst({
+                where: { whatsappNumber: normalizedPhone },
+              })
+            : null;
 
-          reply =
-            `🔐 *WAPPay Registration*\n\n` +
-            `Tap the secure link below to create your account — it only takes a minute:\n\n` +
-            `👉 ${registerUrl}\n\n` +
-            `You'll need:\n` +
-            `• Your full name\n` +
-            `• NIN *or* BVN (11 digits)\n` +
-            `• A 4-digit transaction PIN\n\n` +
-            `_Already registered? Just say *balance* to check your account._`;
+          if (profile?.registrationStatus === 'COMPLETED') {
+            reply = withBrand(
+              `You're already registered with WappPay! 🎉\n\n` +
+              `Say *menu* to see available options, or *balance* to check your wallet.`,
+            );
+            break;
+          }
+
+          // Try to send registration Flow
+          let flowSent = false;
+          if (this.flowSessionService && this.flowSenderService) {
+            try {
+              const flowToken = await this.flowSessionService.createSession(
+                'REGISTRATION',
+                profile?.id,
+                { whatsapp_number: normalizedPhone },
+              );
+
+              const flowId = process.env.WHATSAPP_REGISTRATION_FLOW_ID || '';
+              if (flowId) {
+                flowSent = await this.flowSenderService.sendFlow({
+                  to: normalizedPhone,
+                  flowId,
+                  flowToken,
+                  cta: 'Get Started',
+                  body: 'Complete your WappPay registration in a few quick steps.',
+                  header: 'Create Your Account',
+                  footer: 'from WappPay',
+                  startScreen: 'PERSONAL_INFO',
+                  initialData: {
+                    full_name: contactName || '',
+                    country: 'NG',
+                  },
+                });
+              }
+            } catch (err: any) {
+              this.logger.warn(`Failed to send registration Flow: ${err.message}`);
+            }
+          }
+
+          if (!flowSent) {
+            // Fallback: interactive Get Started button
+            reply = withBrand(
+              `Welcome to WappPay! 👋\n\n` +
+              `Send money, buy airtime, purchase data and send gifts conveniently through WhatsApp.\n\n` +
+              `Let's create your account.\n\n` +
+              `Tap Get Started to continue.`,
+            );
+          } else {
+            reply = withBrand(
+              `Welcome to WappPay! 👋\n\n` +
+              `Please complete the registration form that just appeared.\n\n` +
+              `It only takes a minute!`,
+            );
+          }
           break;
         }
 
@@ -556,7 +631,193 @@ export class AIAssistantService {
     await this.historyService.recordMessage(customer.id, 'user', trimmedMessage);
     await this.historyService.recordMessage(customer.id, 'assistant', reply);
 
-    return reply;
+    // 5. Apply brand sign-off
+    return withBrand(reply);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Wallet Menu Handlers
+  // ---------------------------------------------------------------------------
+
+  private async handleMyWallet(customer: any, normalizedPhone: string): Promise<string> {
+    if (!this.walletService) {
+      return withBrand('Wallet service is temporarily unavailable.');
+    }
+
+    try {
+      const wallet = await this.walletService.getWalletByCustomerId(customer.id);
+      if (!wallet) {
+        return withBrand(
+          `You don't have a wallet yet.\n\n` +
+          `Say *register* to create your account and get a free test wallet!`,
+        );
+      }
+
+      const balance = wallet.balanceKobo;
+      return withBrand(
+        `WAPPAY WALLET\n\n` +
+        `Account Holder: ${customer.fullName || 'N/A'}\n` +
+        `Available Balance: ${formatNaira(balance)}\n` +
+        `Currency: NGN\n` +
+        `Wallet Type: TEST WALLET\n` +
+        `Status: ${wallet.status}\n\n` +
+        `What would you like to do?`,
+      );
+    } catch (err: any) {
+      return withBrand(`Could not load wallet: ${err.message}`);
+    }
+  }
+
+  private async handleDepositMoney(customer: any, normalizedPhone: string): Promise<string> {
+    if (!this.walletService || !this.flowSessionService || !this.flowSenderService) {
+      return withBrand('Deposit is temporarily unavailable. Please try again later.');
+    }
+
+    try {
+      const wallet = await this.walletService.getWalletByCustomerId(customer.id);
+      if (!wallet) {
+        return withBrand(
+          `You need a wallet first.\n\n` +
+          `Say *register* to create your account!`,
+        );
+      }
+
+      // Try to send deposit Flow
+      let flowSent = false;
+      try {
+        const flowToken = await this.flowSessionService.createSession(
+          'DEPOSIT',
+          customer.id,
+          { current_balance: Number(wallet.balanceKobo) / 100 },
+        );
+
+        const flowId = process.env.WHATSAPP_DEPOSIT_FLOW_ID || '';
+        if (flowId) {
+          flowSent = await this.flowSenderService.sendFlow({
+            to: normalizedPhone,
+            flowId,
+            flowToken,
+            cta: 'Deposit',
+            body: 'How much would you like to add to your WappPay test wallet?',
+            header: 'Deposit Money',
+            footer: 'from WappPay',
+            startScreen: 'ENTER_AMOUNT',
+            initialData: {
+              currency: 'NGN',
+              current_balance: Number(wallet.balanceKobo) / 100,
+            },
+          });
+        }
+      } catch (err: any) {
+        this.logger.warn(`Failed to send deposit Flow: ${err.message}`);
+      }
+
+      if (flowSent) {
+        return withBrand('Please complete the deposit form that just appeared.');
+      }
+
+      // Fallback: ask for amount via text
+      return withBrand(
+        `Deposit Money\n\n` +
+        `How much would you like to add to your test wallet?\n\n` +
+        `Current Balance: ${formatNaira(wallet.balanceKobo)}\n\n` +
+        `Reply with an amount, e.g. *Deposit ₦5,000*`,
+      );
+    } catch (err: any) {
+      return withBrand(`Could not start deposit: ${err.message}`);
+    }
+  }
+
+  private async handleTransactionHistory(customer: any, normalizedPhone: string): Promise<string> {
+    if (!this.walletService) {
+      return withBrand('Transaction history is temporarily unavailable.');
+    }
+
+    try {
+      const { transactions, total } = await this.walletService.getTransactions(
+        customer.id,
+        1,
+        10,
+      );
+
+      if (transactions.length === 0) {
+        return withBrand(
+          `📄 No transactions yet.\n\n` +
+          `Say *deposit* to add test funds to your wallet!`,
+        );
+      }
+
+      const lines = transactions.map((t, idx) => {
+        const date = t.createdAt.toLocaleDateString('en-NG', {
+          month: 'short',
+          day: 'numeric',
+        });
+        const amount = formatNaira(t.amountKobo);
+        const sign = t.type === 'DEPOSIT' ? '+' : '-';
+        return `${idx + 1}. ${t.type} ${sign}${amount} (${t.status})\n   ${date} • \`${t.reference}\``;
+      });
+
+      return withBrand(
+        `📊 Recent Transactions (showing ${transactions.length} of ${total}):\n\n` +
+        `${lines.join('\n\n')}\n\n` +
+        `_All transactions are TEST DATA._`,
+      );
+    } catch (err: any) {
+      return withBrand(`Could not load history: ${err.message}`);
+    }
+  }
+
+  private async handleMainMenu(customer: any, normalizedPhone: string): Promise<string> {
+    return withBrand(
+      `WAPPAY MAIN MENU\n\n` +
+      `1. My Wallet\n` +
+      `2. Deposit Money\n` +
+      `3. Send Money — Coming Soon\n` +
+      `4. Buy Airtime — Coming Soon\n` +
+      `5. Buy Data — Coming Soon\n` +
+      `6. Send a Gift — Coming Soon\n` +
+      `7. Transaction History\n` +
+      `8. My Account\n` +
+      `9. Help and Support\n\n` +
+      `Reply with a number or option name.`,
+    );
+  }
+
+  private async handleMyAccount(customer: any, normalizedPhone: string): Promise<string> {
+    if (!this.prisma) {
+      return withBrand('Account info is temporarily unavailable.');
+    }
+
+    try {
+      const profile = await this.prisma.customerProfile.findFirst({
+        where: { whatsappNumber: normalizedPhone },
+      });
+
+      if (!profile) {
+        return withBrand(
+          `No account found.\n\n` +
+          `Say *register* to create your WappPay account!`,
+        );
+      }
+
+      const wallet = this.walletService
+        ? await this.walletService.getWalletByCustomerId(profile.id)
+        : null;
+
+      return withBrand(
+        `MY ACCOUNT\n\n` +
+        `Full Name: ${profile.fullName}\n` +
+        `WhatsApp: ${profile.whatsappNumber}\n` +
+        `Email: ${profile.email || 'Not provided'}\n` +
+        `Country: ${profile.country || 'NG'}\n` +
+        `Identity Verification: ${profile.identityVerificationStatus}\n` +
+        `Registration Date: ${profile.registeredAt?.toLocaleDateString('en-NG') || 'N/A'}\n` +
+        `Wallet Status: ${wallet?.status || 'Not created'}\n\n` +
+        `_All data is TEST DATA._`,
+      );
+    } catch (err: any) {
+      return withBrand(`Could not load account: ${err.message}`);
+    }
   }
 
   // ---------------------------------------------------------------------------

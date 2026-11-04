@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AIModule } from '../artificial-intelligence/ai.module';
 import { VoiceModule } from '../voice/voice.module';
+import { WhatsAppFlowsModule } from '../whatsapp-flows/whatsapp-flows.module';
+import { WalletModule } from '../wallet/wallet.module';
 import { WhatsAppWebhookController } from './controllers/whatsapp-webhook.controller';
 import { MediaController } from './controllers/media.controller';
 import { WhatsAppSignatureService } from './services/whatsapp-signature.service';
@@ -22,9 +24,10 @@ import { IncomingMessageHandler } from './handlers/incoming-message.handler';
  *   - Inbound voice note transcription via VoiceModule (Whisper Large v3)
  *   - Deduplication via the webhook_inbox Prisma model
  *   - Public media assets for network logos (/media/networks/*)
+ *   - WhatsApp Flows (registration, deposit) via WhatsAppFlowsModule
  */
 @Module({
-  imports: [ConfigModule, AIModule, VoiceModule],
+  imports: [ConfigModule, AIModule, VoiceModule, WhatsAppFlowsModule, WalletModule],
   controllers: [WhatsAppWebhookController, MediaController],
   providers: [
     WhatsAppSignatureService,

@@ -15,6 +15,11 @@ import {
   GIFT_KINDS,
 } from '../../gifting/gift.constants';
 import { DATA_PACKAGES } from '../../artificial-intelligence/data.constants';
+import { FlowSessionService } from '../../whatsapp-flows/services/flow-session.service';
+import { RegistrationFlowHandler } from '../../whatsapp-flows/handlers/registration-flow.handler';
+import { DepositFlowHandler } from '../../whatsapp-flows/handlers/deposit-flow.handler';
+import { WalletService } from '../../wallet/wallet.service';
+import { withBrand, formatNaira } from '../../whatsapp-flows/utils/brand';
 
 @Injectable()
 export class IncomingMessageHandler {
@@ -26,6 +31,10 @@ export class IncomingMessageHandler {
     private readonly aiAssistantService: AIAssistantService,
     @Optional() private readonly voiceService?: VoiceService,
     @Optional() private readonly apiService?: WhatsAppApiService,
+    @Optional() private readonly flowSessionService?: FlowSessionService,
+    @Optional() private readonly registrationFlowHandler?: RegistrationFlowHandler,
+    @Optional() private readonly depositFlowHandler?: DepositFlowHandler,
+    @Optional() private readonly walletService?: WalletService,
   ) {}
 
   /**
@@ -101,6 +110,19 @@ export class IncomingMessageHandler {
 
     // 3. Extract text from Text or Interactive messages
     let textBody = '';
+
+    // Handle Flow (nfm_reply) submissions
+    if (
+      message.type === WHATSAPP_MESSAGE_TYPES.INTERACTIVE ||
+      message.type === 'interactive'
+    ) {
+      const interactive = (message as any).interactive;
+
+      // Flow submission (nfm_reply)
+      if (interactive?.type === 'nfm_reply' || interactive?.nfm_reply) {
+        return this.handleFlowSubmission(normalizedPhone, interactive, contactName, message.id);
+      }
+    }
 
     if (message.type === WHATSAPP_MESSAGE_TYPES.TEXT) {
       textBody = message.text?.body?.trim() || '';
@@ -303,6 +325,209 @@ export class IncomingMessageHandler {
     }
 
     return replyText;
+  }
+
+  /**
+   * Handle WhatsApp Flow (nfm_reply) submissions for registration and deposit.
+   */
+  private async handleFlowSubmission(
+    normalizedPhone: string,
+    interactive: any,
+    contactName: string | undefined,
+    messageId: string,
+  ): Promise<string> {
+    const nfmReply = interactive.nfm_reply || interactive;
+    const responseJson = nfmReply.response_json;
+
+    if (!responseJson) {
+      this.logger.warn(`nfm_reply missing response_json from ${maskedPhone(normalizedPhone)}`);
+      const reply = withBrand('Your submission could not be processed. Please try again.');
+      await this.messageService.sendReply(normalizedPhone, reply, messageId);
+      return reply;
+    }
+
+    let responseData: Record<string, any>;
+    try {
+      responseData = typeof responseJson === 'string' ? JSON.parse(responseJson) : responseJson;
+    } catch {
+      this.logger.error(`Failed to parse nfm_reply response_json from ${maskedPhone(normalizedPhone)}`);
+      const reply = withBrand('Your submission could not be processed. Please try again.');
+      await this.messageService.sendReply(normalizedPhone, reply, messageId);
+      return reply;
+    }
+
+    const flowToken = responseData.flow_token;
+    this.logger.log(
+      `Flow submission from ${maskedPhone(normalizedPhone)}: token=${flowToken} keys=${Object.keys(responseData).join(',')}`,
+    );
+
+    if (!flowToken) {
+      const reply = withBrand('Your session has expired. Please start again.');
+      await this.messageService.sendReply(normalizedPhone, reply, messageId);
+      return reply;
+    }
+
+    // Try to find the session to determine flow type
+    let session: any = null;
+    try {
+      session = await this.flowSessionService?.getSession(flowToken);
+    } catch {
+      // Session not found or expired — check if this is a registration completion
+    }
+
+    if (!session) {
+      // Attempt to process as registration completion (session may have been completed)
+      if (responseData.status === 'registered' || responseData.full_name) {
+        return this.completeRegistrationFromFlow(normalizedPhone, responseData, contactName, messageId);
+      }
+      const reply = withBrand('Your session has expired. Please send "register" to start again.');
+      await this.messageService.sendReply(normalizedPhone, reply, messageId);
+      return reply;
+    }
+
+    if (session.flowType === 'REGISTRATION') {
+      return this.completeRegistrationFromFlow(normalizedPhone, responseData, contactName, messageId);
+    }
+
+    if (session.flowType === 'DEPOSIT') {
+      return this.completeDepositFromFlow(normalizedPhone, flowToken, responseData, messageId);
+    }
+
+    const reply = withBrand('Unknown flow type. Please try again.');
+    await this.messageService.sendReply(normalizedPhone, reply, messageId);
+    return reply;
+  }
+
+  private async completeRegistrationFromFlow(
+    normalizedPhone: string,
+    responseData: Record<string, any>,
+    contactName: string | undefined,
+    messageId: string,
+  ): Promise<string> {
+    if (!this.registrationFlowHandler || !this.walletService) {
+      const reply = withBrand('Registration is temporarily unavailable. Please try again later.');
+      await this.messageService.sendReply(normalizedPhone, reply, messageId);
+      return reply;
+    }
+
+    try {
+      const result = await this.registrationFlowHandler.processFlowCompletion(
+        responseData.flow_token || '',
+        responseData,
+        normalizedPhone,
+      );
+
+      if (!result) {
+        const reply = withBrand('Registration could not be completed. Please try again.');
+        await this.messageService.sendReply(normalizedPhone, reply, messageId);
+        return reply;
+      }
+
+      // Send wallet ready message
+      const wallet = await this.walletService.getWalletByCustomerId(result.customerId);
+      const balance = wallet ? wallet.balanceKobo : BigInt(0);
+
+      const walletReadyMsg = withBrand(
+        `Your WappPay wallet is ready! 🎉\n\n` +
+        `Wallet Balance: ${formatNaira(balance)}\n` +
+        `Wallet Type: TEST WALLET\n\n` +
+        `You can now simulate deposits and explore WappPay.\n\n` +
+        `What would you like to do?`,
+      );
+
+      await this.messageService.sendReply(normalizedPhone, walletReadyMsg, messageId);
+
+      // Send interactive wallet menu
+      await this.messageService
+        .sendInteractiveList(
+          normalizedPhone,
+          'Select an option below:',
+          'Choose Action',
+          [
+            {
+              title: 'Wallet Menu',
+              rows: [
+                { id: 'MY_WALLET', title: 'My Wallet', description: 'View balance and wallet details' },
+                { id: 'DEPOSIT_MONEY', title: 'Deposit Money', description: 'Add test funds to your wallet' },
+                { id: 'TRANSACTION_HISTORY', title: 'Transaction History', description: 'View recent transactions' },
+                { id: 'MAIN_MENU', title: 'Main Menu', description: 'Back to main menu' },
+              ],
+            },
+          ],
+          '💰 WappPay Wallet',
+          'from WappPay',
+        )
+        .catch(() => {});
+
+      return walletReadyMsg;
+    } catch (err: any) {
+      this.logger.error(`Registration flow completion error: ${err.message}`);
+      const reply = withBrand('Registration failed. Please try again.');
+      await this.messageService.sendReply(normalizedPhone, reply, messageId);
+      return reply;
+    }
+  }
+
+  private async completeDepositFromFlow(
+    normalizedPhone: string,
+    flowToken: string,
+    responseData: Record<string, any>,
+    messageId: string,
+  ): Promise<string> {
+    if (!this.depositFlowHandler) {
+      const reply = withBrand('Deposit is temporarily unavailable. Please try again later.');
+      await this.messageService.sendReply(normalizedPhone, reply, messageId);
+      return reply;
+    }
+
+    try {
+      const result = await this.depositFlowHandler.processFlowCompletion(
+        flowToken,
+        responseData,
+      );
+
+      if (!result) {
+        const reply = withBrand('Deposit could not be processed. Please try again.');
+        await this.messageService.sendReply(normalizedPhone, reply, messageId);
+        return reply;
+      }
+
+      const amount = responseData.amount;
+      const newBalance = Number(result.newBalanceKobo) / 100;
+
+      const successMsg = withBrand(
+        `Deposit Successful! 🎉\n\n` +
+        `Amount: ${formatNaira(BigInt(Math.round(amount * 100)))}\n` +
+        `New Balance: ${formatNaira(result.newBalanceKobo)}\n` +
+        `Reference: ${result.reference}\n\n` +
+        `This was a simulated test deposit.`,
+      );
+
+      await this.messageService.sendReply(normalizedPhone, successMsg, messageId);
+
+      // Send follow-up buttons
+      await this.messageService
+        .sendInteractiveButtons(
+          normalizedPhone,
+          'What would you like to do next?',
+          [
+            { id: 'MY_WALLET', title: 'View Wallet' },
+            { id: 'TRANSACTION_HISTORY', title: 'History' },
+            { id: 'MAIN_MENU', title: 'Main Menu' },
+          ],
+          undefined,
+          'from WappPay',
+          messageId,
+        )
+        .catch(() => {});
+
+      return successMsg;
+    } catch (err: any) {
+      this.logger.error(`Deposit flow completion error: ${err.message}`);
+      const reply = withBrand('Deposit failed. Please try again.');
+      await this.messageService.sendReply(normalizedPhone, reply, messageId);
+      return reply;
+    }
   }
 
   /**

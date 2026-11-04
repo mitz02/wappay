@@ -30,6 +30,8 @@ async function createHandler() {
       'media/(.*)',
       'register',
       'register/(.*)',
+      'flows',
+      'flows/(.*)',
     ],
   });
   app.useGlobalPipes(

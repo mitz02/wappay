@@ -101,6 +101,41 @@ enum ReconciliationStatus {
   FAILED
 }
 
+enum RegistrationStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum IdentityVerificationStatus {
+  NOT_STARTED
+  PENDING
+  VERIFIED
+  FAILED
+  ADDITIONAL_INFO_REQUIRED
+}
+
+enum WalletStatus {
+  ACTIVE
+  FROZEN
+  CLOSED
+}
+
+enum WalletTransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  TRANSFER
+  AIRTIME
+  DATA
+  GIFT
+}
+
+enum WalletTransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
 // -----------------------------------------------------------------------------
 // IDENTITY & USERS
 // -----------------------------------------------------------------------------
@@ -155,6 +190,9 @@ model CustomerProfile {
   identityNumber     String?        // 11-digit NIN or BVN (masked at rest in responses)
   isIdentityVerified Boolean        @default(false)
   registeredAt       DateTime?
+  country            String         @default("NG")
+  registrationStatus RegistrationStatus @default(NOT_STARTED)
+  identityVerificationStatus IdentityVerificationStatus @default(NOT_STARTED)
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
 
@@ -163,6 +201,8 @@ model CustomerProfile {
   transactions       Transaction[]
   ledgerAccounts     LedgerAccount[]
   conversationMessages ConversationMessage[]
+  wallet             Wallet?
+  flowSessions       FlowSession[]
 
   @@index([status])
   @@map("customer_profiles")
@@ -362,6 +402,66 @@ model WebhookInbox {
 
   @@index([provider, status])
   @@map("webhook_inbox")
+}
+
+// -----------------------------------------------------------------------------
+// MOCK WALLET (TEST DATA — not a real stored-value account)
+// -----------------------------------------------------------------------------
+
+model Wallet {
+  id            String         @id @default(uuid())
+  customerId    String         @unique
+  customer      CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  walletType    String         @default("MOCK") // Always MOCK for test wallets
+  currency      String         @default("NGN")
+  balanceKobo   BigInt         @default(0)
+  status        WalletStatus   @default(ACTIVE)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  transactions  WalletTransaction[]
+
+  @@index([customerId])
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id                String                  @id @default(uuid())
+  walletId          String
+  wallet            Wallet                  @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  reference         String                  @unique
+  idempotencyKey    String?                 @unique
+  type              WalletTransactionType
+  amountKobo        BigInt
+  balanceAfterKobo  BigInt
+  status            WalletTransactionStatus @default(COMPLETED)
+  description       String?
+  metadata          String?                 // JSON metadata
+  createdAt         DateTime                @default(now())
+
+  @@index([walletId, createdAt])
+  @@map("wallet_transactions")
+}
+
+// -----------------------------------------------------------------------------
+// WHATSAPP FLOW SESSIONS
+// -----------------------------------------------------------------------------
+
+model FlowSession {
+  id            String    @id @default(uuid())
+  flowToken     String    @unique
+  flowType      String    // "REGISTRATION" | "DEPOSIT"
+  customerId    String?
+  customer      CustomerProfile? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  status        String    @default("ACTIVE") // "ACTIVE" | "COMPLETED" | "EXPIRED"
+  data          String?   // JSON payload
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  expiresAt     DateTime
+
+  @@index([flowToken])
+  @@index([customerId, flowType])
+  @@map("flow_sessions")
 }
 
 // -----------------------------------------------------------------------------

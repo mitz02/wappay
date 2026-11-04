@@ -19,6 +19,8 @@ import { AdminModule } from './modules/administrators/admin.module';
 import { MockFinancialModule } from './modules/mock-financial/mock-financial.module';
 import { GiftingModule } from './modules/gifting/gifting.module';
 import { RegistrationModule } from './modules/registration/registration.module';
+import { WalletModule } from './modules/wallet/wallet.module';
+import { WhatsAppFlowsModule } from './modules/whatsapp-flows/whatsapp-flows.module';
 
 @Module({
   imports: [
@@ -44,6 +46,8 @@ import { RegistrationModule } from './modules/registration/registration.module';
     AdminModule,
     GiftingModule,
     RegistrationModule,
+    WalletModule,
+    WhatsAppFlowsModule,
   ],
 })
 export class AppModule {}

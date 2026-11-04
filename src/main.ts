@@ -28,6 +28,8 @@ async function bootstrap() {
       'media/(.*)',
       'register',
       'register/(.*)',
+      'flows',
+      'flows/(.*)',
     ],
   });
 

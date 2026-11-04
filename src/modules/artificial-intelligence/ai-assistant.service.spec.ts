@@ -443,6 +443,7 @@ describe('AIAssistantService', () => {
     const reply = await service.processCustomerMessage('2348012345678', 'Hello there');
 
     expect(mockChatProvider.generateChatResponse).toHaveBeenCalledTimes(1);
-    expect(reply).toBe('Hello Adebayo! How can I help you today?');
+    expect(reply).toContain('Hello Adebayo! How can I help you today?');
+    expect(reply).toContain('from WappPay');
   });
 });

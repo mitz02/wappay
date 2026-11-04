@@ -16,16 +16,136 @@ import {
   ShieldCheck,
   ChevronRight,
   Check,
+  Radio,
 } from 'lucide-react';
+
+// ============================================================================
+// Official Vector Telco Brand Logos (MTN, Airtel, Glo, 9mobile)
+// ============================================================================
+
+export function NetworkLogo({
+  network,
+  className = 'h-9 w-9',
+}: {
+  network: string;
+  className?: string;
+}) {
+  const net = network.toUpperCase();
+
+  // 🟡 MTN Nigeria Official Oval Logo
+  if (net.includes('MTN')) {
+    return (
+      <div
+        className={`${className} rounded-xl bg-[#FFCC00] flex items-center justify-center p-1 shadow-sm border border-amber-400/80 flex-shrink-0 transition-transform group-hover:scale-105`}
+        title="MTN Nigeria"
+      >
+        <svg viewBox="0 0 44 26" className="w-full h-full" fill="none">
+          <ellipse cx="22" cy="13" rx="20" ry="11" stroke="#000000" strokeWidth="2.5" fill="#FFCC00" />
+          <text
+            x="22"
+            y="17"
+            textAnchor="middle"
+            fill="#000000"
+            fontSize="11.5"
+            fontWeight="900"
+            fontFamily="system-ui, -apple-system, sans-serif"
+            letterSpacing="-0.6"
+          >
+            MTN
+          </text>
+        </svg>
+      </div>
+    );
+  }
+
+  // 🔴 Airtel Nigeria Official Brand Logo
+  if (net.includes('AIRTEL')) {
+    return (
+      <div
+        className={`${className} rounded-xl bg-gradient-to-br from-[#FF1A1A] to-[#D90000] flex items-center justify-center p-1.5 shadow-sm border border-red-400/80 flex-shrink-0 transition-transform group-hover:scale-105`}
+        title="Airtel Nigeria"
+      >
+        <svg viewBox="0 0 32 32" className="w-full h-full" fill="none">
+          <path
+            d="M16 4C9.37 4 4 9.37 4 16c0 4.14 2.11 7.79 5.33 9.94.38-.45.92-.85 1.57-1.12 2.8-1.15 5.5-.32 7.8 1.48.58.45 1.15.58 1.7.35.54-.23.95-.7 1.15-1.32.74-2.28 2.22-3.8 4.28-4.43.32-.1.54-.3.67-.58C27.53 18.79 28 17.44 28 16c0-6.63-5.37-12-12-12zm-3.2 13.8c-1.8 0-3.2-1.4-3.2-3.2s1.4-3.2 3.2-3.2 3.2 1.4 3.2 3.2-1.4 3.2-3.2 3.2z"
+            fill="#FFFFFF"
+          />
+        </svg>
+      </div>
+    );
+  }
+
+  // 🟢 Glo Nigeria Official Green Brand Logo
+  if (net.includes('GLO')) {
+    return (
+      <div
+        className={`${className} rounded-xl bg-gradient-to-br from-[#00A859] to-[#006837] flex items-center justify-center p-1 shadow-sm border border-emerald-400/80 flex-shrink-0 transition-transform group-hover:scale-105`}
+        title="Glo Nigeria"
+      >
+        <svg viewBox="0 0 36 26" className="w-full h-full" fill="none">
+          <circle cx="18" cy="13" r="11" fill="#008848" />
+          <text
+            x="18"
+            y="17"
+            textAnchor="middle"
+            fill="#FFFFFF"
+            fontSize="12.5"
+            fontWeight="900"
+            fontStyle="italic"
+            fontFamily="system-ui, sans-serif"
+          >
+            glo
+          </text>
+        </svg>
+      </div>
+    );
+  }
+
+  // 🟢 9mobile Official Emerald & Lime Logo
+  if (net.includes('9MOBILE') || net.includes('ETISALAT')) {
+    return (
+      <div
+        className={`${className} rounded-xl bg-gradient-to-br from-[#00573F] to-[#003828] flex items-center justify-center p-1 shadow-sm border border-emerald-600/80 flex-shrink-0 transition-transform group-hover:scale-105`}
+        title="9mobile Nigeria"
+      >
+        <svg viewBox="0 0 32 32" className="w-full h-full" fill="none">
+          <circle cx="16" cy="16" r="13" fill="#004D36" />
+          <circle cx="21" cy="10" r="3" fill="#A0CF67" />
+          <path
+            d="M16 8c-4.42 0-8 3.58-8 8 0 2.8 1.44 5.3 3.65 6.7.4.26.94.14 1.2-.26.26-.4.14-.94-.26-1.2-1.7-1.08-2.8-2.95-2.8-5.24 0-3.3 2.7-6 6-6s6 2.7 6 6c0 1.4-.48 2.7-1.3 3.73l-3.6 4.6c-.34.43-.27 1.05.16 1.39.43.34 1.05.27 1.39-.16l3.8-4.85C23.2 19.3 24 17.7 24 16c0-4.42-3.58-8-8-8z"
+            fill="#FFFFFF"
+          />
+        </svg>
+      </div>
+    );
+  }
+
+  // Generic Icon Fallback
+  return (
+    <div className={`${className} rounded-xl bg-white/20 flex items-center justify-center font-bold text-white text-xs`}>
+      {network.slice(0, 3)}
+    </div>
+  );
+}
+
+interface ChatOption {
+  id: string;
+  label: string;
+  sub?: string;
+  network?: string;
+  badge?: string;
+  price?: string;
+  plan?: string;
+  validity?: string;
+}
 
 interface ChatMessage {
   id: string;
   sender: 'bot' | 'user';
   text: string;
   timestamp: string;
-  options?: Array<{ id: string; label: string; sub?: string; icon?: string }>;
-  isDataOptions?: boolean;
-  isReceipt?: boolean;
+  options?: ChatOption[];
+  networkContext?: string;
 }
 
 export function WhatsAppSimulatorView() {
@@ -69,13 +189,13 @@ export function WhatsAppSimulatorView() {
     {
       id: 'm7',
       sender: 'bot',
-      text: 'Welcome to WAPPay! 🚀\nI am your conversational financial assistant. You can check balances, transfer funds, buy instant airtime & internet data, or send gifts!',
+      text: 'Welcome to WAPPay! 🚀\nI can help you buy instant mobile data, top-up airtime, transfer funds, or check balances. Tap an option below to test:',
       timestamp: '12:33 PM',
       options: [
-        { id: 'buy data', label: '🌐 Buy Data Bundle', sub: 'Instant 4G/5G' },
-        { id: 'buy airtime', label: '⚡ Buy Airtime', sub: '3% Cashback' },
-        { id: 'balance', label: '💰 Check Balance', sub: 'Wallet Balance' },
-        { id: 'gift', label: '🎁 Gift Shop', sub: 'Send a Surprise' },
+        { id: 'buy data', label: '🌐 Buy Data Bundle', sub: 'MTN, Airtel, Glo, 9mobile', badge: '3% Cashback' },
+        { id: 'buy airtime', label: '⚡ Buy Airtime', sub: 'Instant Recharge', badge: 'Bonus' },
+        { id: 'balance', label: '💰 Check Balance', sub: 'Authoritative Ledger Balance' },
+        { id: 'gift', label: '🎁 Gift Shop', sub: 'Send Airtime, Data or Cash' },
       ],
     },
   ]);
@@ -96,96 +216,138 @@ export function WhatsAppSimulatorView() {
     scrollToBottom();
   }, [messages, loading]);
 
-  // Extract clickable button options from bot responses
-  const extractInteractiveButtons = (
-    text: string,
-  ): Array<{ id: string; label: string; sub?: string; icon?: string }> | undefined => {
+  // Extract clickable button options with brand logos & badges from bot responses
+  const extractInteractiveButtons = (text: string): { options?: ChatOption[]; networkContext?: string } => {
+    // 1. Mobile Network Selection for Data
     if (text.includes('SELECT DATA NETWORK') || text.includes('SELECT MOBILE NETWORK FOR DATA')) {
-      return [
-        { id: 'MTN', label: '🟡 MTN Nigeria', sub: 'Instant 4G/5G • 3% Cashback', icon: '🟡' },
-        { id: 'AIRTEL', label: '🔴 Airtel Nigeria', sub: 'Smart Speed • 3% Cashback', icon: '🔴' },
-        { id: 'GLO', label: '🟢 Glo Nigeria', sub: 'Unlimited Grand • 3% Cashback', icon: '🟢' },
-        { id: '9MOBILE', label: '🟢 9mobile', sub: 'Super Fast Data • 3% Cashback', icon: '🟢' },
-      ];
+      return {
+        options: [
+          {
+            id: 'MTN',
+            label: 'MTN Nigeria',
+            sub: 'Instant 4G/5G Broadband',
+            network: 'MTN',
+            badge: '⚡ 3% Cashback',
+          },
+          {
+            id: 'AIRTEL',
+            label: 'Airtel Nigeria',
+            sub: 'Smart Speed & Video Streaming',
+            network: 'AIRTEL',
+            badge: '🔴 3% Cashback',
+          },
+          {
+            id: 'GLO',
+            label: 'Glo Nigeria',
+            sub: 'Unlimited Grand Masters of Data',
+            network: 'GLO',
+            badge: '🟢 3% Cashback',
+          },
+          {
+            id: '9MOBILE',
+            label: '9mobile Nigeria',
+            sub: 'Super Fast Blaze Data',
+            network: '9MOBILE',
+            badge: '⚡ 3% Cashback',
+          },
+        ],
+      };
     }
 
+    // 2. Data Plans Selection
     if (text.includes('SELECT DATA PLAN')) {
       const isAirtel = text.includes('Airtel');
       const isGlo = text.includes('Glo');
       const is9mobile = text.includes('9mobile');
+      const net = isAirtel ? 'AIRTEL' : isGlo ? 'GLO' : is9mobile ? '9MOBILE' : 'MTN';
 
       if (isAirtel) {
-        return [
-          { id: '1GB', label: '1GB (1 Day)', sub: '₦350 • 3% Cashback' },
-          { id: '2GB', label: '2GB (2 Days)', sub: '₦600 • 3% Cashback' },
-          { id: '5GB', label: '5GB (Weekly)', sub: '₦1,500 • 3% Cashback' },
-          { id: '10GB', label: '10GB (Monthly)', sub: '₦3,000 • 3% Cashback' },
-          { id: '20GB', label: '20GB (Monthly)', sub: '₦5,000 • 3% Cashback' },
-        ];
+        return {
+          networkContext: 'AIRTEL',
+          options: [
+            { id: '1GB', label: '1GB Data', sub: 'Daily Plan', plan: '1GB', price: '₦350', validity: '24 Hours', badge: 'Daily' },
+            { id: '2GB', label: '2GB Data', sub: '2-Day Plan', plan: '2GB', price: '₦600', validity: '2 Days', badge: 'Popular' },
+            { id: '5GB', label: '5GB Data', sub: 'Weekly Plan', plan: '5GB', price: '₦1,500', validity: '7 Days', badge: '🔥 Best Seller' },
+            { id: '10GB', label: '10GB Data', sub: 'Monthly Plan', plan: '10GB', price: '₦3,000', validity: '30 Days', badge: 'Monthly' },
+            { id: '20GB', label: '20GB Data', sub: 'Heavy Streaming', plan: '20GB', price: '₦5,000', validity: '30 Days', badge: '💎 Max' },
+          ],
+        };
       }
+
       if (isGlo) {
-        return [
-          { id: '1.25GB', label: '1.25GB (1 Day)', sub: '₦350 • 3% Cashback' },
-          { id: '2.5GB', label: '2.5GB (2 Days)', sub: '₦600 • 3% Cashback' },
-          { id: '5.8GB', label: '5.8GB (Weekly)', sub: '₦1,500 • 3% Cashback' },
-          { id: '10GB', label: '10GB (Monthly)', sub: '₦3,000 • 3% Cashback' },
-          { id: '18GB', label: '18GB (Monthly)', sub: '₦5,000 • 3% Cashback' },
-        ];
+        return {
+          networkContext: 'GLO',
+          options: [
+            { id: '1.25GB', label: '1.25GB Data', sub: 'Daily Plan', plan: '1.25GB', price: '₦350', validity: '24 Hours', badge: 'Daily' },
+            { id: '2.5GB', label: '2.5GB Data', sub: '2-Day Berekete', plan: '2.5GB', price: '₦600', validity: '2 Days', badge: 'Popular' },
+            { id: '5.8GB', label: '5.8GB Data', sub: 'Weekly Plan', plan: '5.8GB', price: '₦1,500', validity: '7 Days', badge: '🔥 Best Value' },
+            { id: '10GB', label: '10GB Data', sub: 'Monthly Plan', plan: '10GB', price: '₦3,000', validity: '30 Days', badge: 'Monthly' },
+            { id: '18GB', label: '18GB Data', sub: 'Grand Masters', plan: '18GB', price: '₦5,000', validity: '30 Days', badge: '💎 Mega' },
+          ],
+        };
       }
+
       if (is9mobile) {
-        return [
-          { id: '1GB', label: '1GB (1 Day)', sub: '₦350 • 3% Cashback' },
-          { id: '2.5GB', label: '2.5GB (2 Days)', sub: '₦600 • 3% Cashback' },
-          { id: '5GB', label: '5GB (Weekly)', sub: '₦1,500 • 3% Cashback' },
-          { id: '11GB', label: '11GB (Monthly)', sub: '₦3,000 • 3% Cashback' },
-          { id: '20GB', label: '20GB (Monthly)', sub: '₦5,000 • 3% Cashback' },
-        ];
+        return {
+          networkContext: '9MOBILE',
+          options: [
+            { id: '1GB', label: '1GB Data', sub: 'Daily Plan', plan: '1GB', price: '₦350', validity: '24 Hours', badge: 'Daily' },
+            { id: '2.5GB', label: '2.5GB Data', sub: '2-Day Blaze', plan: '2.5GB', price: '₦600', validity: '2 Days', badge: 'Popular' },
+            { id: '5GB', label: '5GB Data', sub: 'Weekly Plan', plan: '5GB', price: '₦1,500', validity: '7 Days', badge: '🔥 Best Value' },
+            { id: '11GB', label: '11GB Data', sub: 'Monthly Plan', plan: '11GB', price: '₦3,000', validity: '30 Days', badge: 'Monthly' },
+            { id: '20GB', label: '20GB Data', sub: 'Heavy User', plan: '20GB', price: '₦5,000', validity: '30 Days', badge: '💎 Max' },
+          ],
+        };
       }
-      // MTN default
-      return [
-        { id: '1GB', label: '1GB (1 Day)', sub: '₦350 • 3% Cashback' },
-        { id: '2.5GB', label: '2.5GB (2 Days)', sub: '₦600 • 3% Cashback' },
-        { id: '5GB', label: '5GB (Weekly)', sub: '₦1,500 • 3% Cashback' },
-        { id: '10GB', label: '10GB (Monthly)', sub: '₦3,000 • 3% Cashback' },
-        { id: '20GB', label: '20GB (Monthly)', sub: '₦5,000 • 3% Cashback' },
-      ];
+
+      // MTN Default
+      return {
+        networkContext: 'MTN',
+        options: [
+          { id: '1GB', label: '1GB Data', sub: 'Daily Plan', plan: '1GB', price: '₦350', validity: '24 Hours', badge: 'Daily' },
+          { id: '2.5GB', label: '2.5GB Data', sub: '2-Day Plan', plan: '2.5GB', price: '₦600', validity: '2 Days', badge: 'Popular' },
+          { id: '5GB', label: '5GB Data', sub: 'Weekly Plan', plan: '5GB', price: '₦1,500', validity: '7 Days', badge: '🔥 Best Value' },
+          { id: '10GB', label: '10GB Data', sub: 'Monthly Plan', plan: '10GB', price: '₦3,000', validity: '30 Days', badge: 'Monthly' },
+          { id: '20GB', label: '20GB Data', sub: 'Heavy User Plan', plan: '20GB', price: '₦5,000', validity: '30 Days', badge: '💎 Max' },
+        ],
+      };
     }
 
+    // 3. Airtime Network Selection
     if (text.includes('SELECT MOBILE NETWORK') || text.includes('Instant Mobile Airtime Top-Up')) {
-      return [
-        { id: 'MTN', label: '🟡 MTN Nigeria', sub: '3% Cashback', icon: '🟡' },
-        { id: 'AIRTEL', label: '🔴 Airtel Nigeria', sub: '3% Cashback', icon: '🔴' },
-        { id: 'GLO', label: '🟢 Glo Nigeria', sub: '3% Cashback', icon: '🟢' },
-        { id: '9MOBILE', label: '🟢 9mobile', sub: '3% Cashback', icon: '🟢' },
-      ];
+      return {
+        options: [
+          { id: 'MTN', label: 'MTN Nigeria', sub: 'Instant Recharge', network: 'MTN', badge: '3% Cashback' },
+          { id: 'AIRTEL', label: 'Airtel Nigeria', sub: 'Smart Top-Up', network: 'AIRTEL', badge: '3% Cashback' },
+          { id: 'GLO', label: 'Glo Nigeria', sub: 'Berekete Talk', network: 'GLO', badge: '3% Cashback' },
+          { id: '9MOBILE', label: '9mobile', sub: 'Super Fast Top-Up', network: '9MOBILE', badge: '3% Cashback' },
+        ],
+      };
     }
 
+    // 4. Airtime Packages Selection
     if (text.includes('SELECT AIRTIME AMOUNT')) {
-      return [
-        { id: '500', label: '₦500 Airtime', sub: 'Pay ₦485 (Save ₦15)' },
-        { id: '1000', label: '₦1,000 Airtime', sub: 'Pay ₦970 (Save ₦30)' },
-        { id: '2000', label: '₦2,000 Airtime', sub: 'Pay ₦1,940 (Save ₦60)' },
-        { id: '5000', label: '₦5,000 Airtime', sub: 'Pay ₦4,850 (Save ₦150)' },
-      ];
+      return {
+        options: [
+          { id: '500', label: '₦500 Airtime', sub: 'Pay ₦485 (Save ₦15)', badge: 'Save ₦15' },
+          { id: '1000', label: '₦1,000 Airtime', sub: 'Pay ₦970 (Save ₦30)', badge: '🔥 Popular' },
+          { id: '2000', label: '₦2,000 Airtime', sub: 'Pay ₦1,940 (Save ₦60)', badge: 'Save ₦60' },
+          { id: '5000', label: '₦5,000 Airtime', sub: 'Pay ₦4,850 (Save ₦150)', badge: '💎 Value' },
+        ],
+      };
     }
 
-    if (text.includes('SELECT GIFT TO SEND')) {
-      return [
-        { id: '1', label: 'Starter Airtime (₦1k)', sub: 'Delivered via WhatsApp' },
-        { id: '4', label: 'Starter Data (1.5GB)', sub: '₦1,000 • Instant Claim' },
-        { id: '7', label: 'Starter Money (₦1k)', sub: 'Cash to Wallet' },
-        { id: '5', label: 'Deluxe Data (6GB)', sub: '₦4,000' },
-      ];
-    }
-
+    // 5. Transfer Confirmation
     if (text.includes('Reply *YES* to confirm') || text.includes('Simulated Transfer Confirmation')) {
-      return [
-        { id: 'YES', label: '✅ Confirm Transfer', sub: 'Execute simulated debit' },
-        { id: 'CANCEL', label: '❌ Cancel Transfer', sub: 'Abort transaction' },
-      ];
+      return {
+        options: [
+          { id: 'YES', label: '✅ Confirm & Send Transfer', sub: 'Execute simulated debit', badge: 'Instant' },
+          { id: 'CANCEL', label: '❌ Cancel Transaction', sub: 'Safely abort', badge: 'Safe' },
+        ],
+      };
     }
 
-    return undefined;
+    return {};
   };
 
   const handleSendMessage = async (rawText: string) => {
@@ -194,7 +356,7 @@ export function WhatsAppSimulatorView() {
 
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    // Append outgoing user message
+    // Append outgoing user message (Clean white bubble on the right)
     const userMsg: ChatMessage = {
       id: `usr_${Date.now()}`,
       sender: 'user',
@@ -207,7 +369,7 @@ export function WhatsAppSimulatorView() {
     setLoading(true);
 
     try {
-      // 1. Try hitting the local NestJS simulator API
+      // 1. Send to backend simulator endpoint
       const res = await fetch('http://localhost:3000/api/v1/admin/simulator/message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -221,7 +383,7 @@ export function WhatsAppSimulatorView() {
       if (res.ok) {
         const data = await res.json();
         const replyText = data.reply || '';
-        const options = extractInteractiveButtons(replyText);
+        const { options, networkContext } = extractInteractiveButtons(replyText);
 
         setMessages((prev) => [
           ...prev,
@@ -231,16 +393,17 @@ export function WhatsAppSimulatorView() {
             text: replyText,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             options,
+            networkContext,
           },
         ]);
         setLoading(false);
         return;
       }
     } catch {
-      // Fallback to client-side simulated interactive assistant if server offline
+      // Fallback to client-side simulated interactive assistant if offline
     }
 
-    // Client-side fallback conversational state engine for seamless testing
+    // Client-side fallback with authentic telco state machine
     setTimeout(() => {
       let reply = '';
       const lower = textToSend.toLowerCase();
@@ -253,17 +416,17 @@ export function WhatsAppSimulatorView() {
           `⚡ *Instant Mobile Internet Data Top-Up*\n` +
           `🎁 *Bonus:* Get *3% instant cashback* on every bundle!\n` +
           `📞 *Beneficiary Line:* \`${selectedPhone}\`\n\n` +
-          `Please choose your mobile network:`;
+          `Please choose your mobile network with the official logos below:`;
       } else if (['mtn', 'airtel', 'glo', '9mobile'].includes(lower)) {
         const net = textToSend.toUpperCase();
         reply =
           `╔═══════════════════════════════════════╗\n` +
           `║          🌐 SELECT DATA PLAN          ║\n` +
           `╚═══════════════════════════════════════╝\n\n` +
-          `🟡 *Network:* *${net} Nigeria*\n` +
+          `📶 *Network:* *${net} Nigeria*\n` +
           `📱 *Recipient:* \`${selectedPhone}\`\n` +
           `🎁 *Bonus:* 3% Instant Cashback\n\n` +
-          `Choose a data package (clickable buttons below):`;
+          `Choose your ${net} data bundle (clickable buttons below):`;
       } else if (
         ['1gb', '2gb', '2.5gb', '5gb', '5.8gb', '10gb', '11gb', '18gb', '20gb'].some((p) =>
           lower.includes(p),
@@ -275,7 +438,7 @@ export function WhatsAppSimulatorView() {
           `╚═══════════════════════════════════════╝\n\n` +
           `✅ *Simulated Data Bundle Purchase Successful!*\n\n` +
           `• *Network:* 🟡 MTN Nigeria\n` +
-          `• *Plan:* *${textToSend.toUpperCase()} High-Speed Data*\n` +
+          `• *Plan:* *${textToSend.toUpperCase()} High-Speed Broadband*\n` +
           `• *Beneficiary Phone:* \`${selectedPhone}\`\n` +
           `• *Amount Debited:* *₦600.00*\n` +
           `• *Cashback Earned:* *+₦18.00* (3% instant bonus)\n` +
@@ -307,7 +470,7 @@ export function WhatsAppSimulatorView() {
           `I am ready to assist you. Try clicking one of the buttons below:`;
       }
 
-      const options = extractInteractiveButtons(reply);
+      const { options, networkContext } = extractInteractiveButtons(reply);
 
       setMessages((prev) => [
         ...prev,
@@ -317,10 +480,11 @@ export function WhatsAppSimulatorView() {
           text: reply,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           options,
+          networkContext,
         },
       ]);
       setLoading(false);
-    }, 600);
+    }, 500);
   };
 
   const handleResetChat = () => {
@@ -364,13 +528,13 @@ export function WhatsAppSimulatorView() {
       {
         id: 'm7',
         sender: 'bot',
-        text: 'Welcome to WAPPay! 🚀\nI can help you buy mobile data, airtime, transfer money, check balances, or send gifts. Tap an option below to test:',
+        text: 'Welcome to WAPPay! 🚀\nI can help you buy instant mobile data, airtime, transfer money, or check balances. Tap an option below to test:',
         timestamp: '12:33 PM',
         options: [
-          { id: 'buy data', label: '🌐 Buy Data Bundle', sub: 'Instant 4G/5G' },
-          { id: 'buy airtime', label: '⚡ Buy Airtime', sub: '3% Cashback' },
+          { id: 'buy data', label: '🌐 Buy Data Bundle', sub: 'MTN, Airtel, Glo, 9mobile', badge: '3% Cashback' },
+          { id: 'buy airtime', label: '⚡ Buy Airtime', sub: 'Instant Recharge', badge: 'Bonus' },
           { id: 'balance', label: '💰 Check Balance', sub: 'Wallet Balance' },
-          { id: 'gift', label: '🎁 Gift Shop', sub: 'Send a Gift' },
+          { id: 'gift', label: '🎁 Gift Shop', sub: 'Send a Surprise Gift' },
         ],
       },
     ]);
@@ -386,13 +550,13 @@ export function WhatsAppSimulatorView() {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-semibold text-white">WhatsApp Chat Boxes UI Simulator</h2>
+              <h2 className="text-sm font-semibold text-white">WhatsApp Chat Simulator</h2>
               <span className="px-2 py-0.5 text-[10px] font-bold tracking-wide uppercase bg-indigo-500/20 text-indigo-300 rounded border border-indigo-500/30">
-                Exact Layout
+                Exact Layout & Logos
               </span>
             </div>
             <p className="text-xs text-slate-400">
-              Matches your periwinkle-purple layout with clickable button options for network & data.
+              Matches your periwinkle-purple layout with authentic MTN, Airtel, Glo & 9mobile SVG logos.
             </p>
           </div>
         </div>
@@ -431,7 +595,6 @@ export function WhatsAppSimulatorView() {
                 ? 'bg-slate-800 text-white border-slate-700'
                 : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
             }`}
-            title="Toggle between phone mockup and expanded full view"
           >
             <Smartphone className="h-3.5 w-3.5" />
             {deviceFrame ? 'Phone Frame' : 'Full Width'}
@@ -453,11 +616,11 @@ export function WhatsAppSimulatorView() {
         <div
           className={`h-full flex flex-col transition-all duration-300 shadow-2xl overflow-hidden ${
             deviceFrame
-              ? 'w-full max-w-[460px] rounded-3xl border-[6px] border-slate-800 ring-1 ring-slate-700'
+              ? 'w-full max-w-[480px] rounded-3xl border-[6px] border-slate-800 ring-1 ring-slate-700'
               : 'w-full rounded-2xl border border-slate-800'
           }`}
           style={{
-            // EXACT Background matching the screenshot: vibrant blue-violet / purple
+            // EXACT Background matching your screenshot: vibrant periwinkle purple
             background: '#5855f4',
           }}
         >
@@ -502,7 +665,7 @@ export function WhatsAppSimulatorView() {
                 >
                   {/* Speech Bubble */}
                   <div
-                    className={`max-w-[85%] text-[14.5px] leading-relaxed transition shadow-sm ${
+                    className={`max-w-[88%] text-[14.5px] leading-relaxed transition shadow-sm ${
                       isBot
                         ? /* EXACT Incoming Bubble: Semi-transparent purple/lavender pill, crisp white text */
                           'bg-white/20 backdrop-blur-sm text-white rounded-3xl rounded-tl-lg px-5 py-3'
@@ -523,34 +686,123 @@ export function WhatsAppSimulatorView() {
 
                   {/* Clickable Interactive Buttons (Under Bot Message) */}
                   {isBot && msg.options && msg.options.length > 0 && (
-                    <div className="mt-2.5 w-full max-w-[85%] space-y-1.5 animate-in slide-in-from-bottom-2 duration-300">
-                      <p className="text-[11px] font-semibold tracking-wider uppercase text-white/70 px-1 mb-1 flex items-center gap-1.5">
-                        <Sparkles className="h-3 w-3 text-amber-300" /> Click to Choose:
-                      </p>
-                      <div className="grid grid-cols-1 gap-1.5">
-                        {msg.options.map((opt) => (
-                          <button
-                            key={opt.id}
-                            onClick={() => handleSendMessage(opt.id)}
-                            className="w-full text-left bg-white/95 hover:bg-white text-[#2a2652] hover:text-indigo-900 rounded-2xl px-4 py-2.5 shadow-sm transition hover:scale-[1.01] active:scale-[0.99] border border-white/40 flex items-center justify-between group"
-                          >
-                            <div className="flex items-center gap-2.5">
-                              {opt.icon && <span className="text-base">{opt.icon}</span>}
+                    <div className="mt-3 w-full max-w-[88%] space-y-2 animate-in slide-in-from-bottom-2 duration-300">
+                      <div className="flex items-center justify-between px-1">
+                        <p className="text-[11px] font-semibold tracking-wider uppercase text-white/80 flex items-center gap-1.5">
+                          <Sparkles className="h-3 w-3 text-amber-300" /> Tap to Select:
+                        </p>
+                        {msg.networkContext && (
+                          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/15 border border-white/20 text-[10px] text-white">
+                            <NetworkLogo network={msg.networkContext} className="h-3.5 w-3.5" />
+                            <span>{msg.networkContext}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Network Selection Buttons (with Official Logos) */}
+                      {msg.options[0]?.network ? (
+                        <div className="grid grid-cols-1 gap-2">
+                          {msg.options.map((opt) => (
+                            <button
+                              key={opt.id}
+                              onClick={() => handleSendMessage(opt.id)}
+                              className="w-full text-left bg-white/95 hover:bg-white text-[#2a2652] hover:text-indigo-900 rounded-2xl p-3 shadow-md transition-all hover:scale-[1.01] active:scale-[0.99] border border-white/40 flex items-center justify-between group"
+                            >
+                              <div className="flex items-center gap-3">
+                                {/* Official Vector Telco Logo */}
+                                <NetworkLogo network={opt.network || opt.id} className="h-10 w-10" />
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-bold text-sm text-[#2a2652] group-hover:text-indigo-950">
+                                      {opt.label}
+                                    </p>
+                                    {opt.badge && (
+                                      <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-500/10 text-amber-700 border border-amber-500/20">
+                                        {opt.badge}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {opt.sub && (
+                                    <p className="text-xs text-slate-500 mt-0.5 group-hover:text-slate-700">
+                                      {opt.sub}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                              <ChevronRight className="h-5 w-5 text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition" />
+                            </button>
+                          ))}
+                        </div>
+                      ) : msg.options[0]?.plan ? (
+                        /* Data Packages Grid Cards */
+                        <div className="grid grid-cols-1 gap-2">
+                          {msg.options.map((opt) => (
+                            <button
+                              key={opt.id}
+                              onClick={() => handleSendMessage(opt.id)}
+                              className="w-full text-left bg-white/95 hover:bg-white text-[#2a2652] hover:text-indigo-900 rounded-2xl p-3 shadow-md transition-all hover:scale-[1.01] active:scale-[0.99] border border-white/40 flex items-center justify-between group"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="h-10 w-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex flex-col items-center justify-center font-black text-indigo-700 text-xs">
+                                  <Wifi className="h-4 w-4 text-indigo-600 mb-0.5" />
+                                  <span className="text-[10px] leading-none font-bold">{opt.plan}</span>
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-bold text-sm text-[#2a2652] group-hover:text-indigo-950">
+                                      {opt.label}
+                                    </p>
+                                    {opt.badge && (
+                                      <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-indigo-50 text-indigo-600 border border-indigo-200">
+                                        {opt.badge}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-xs text-slate-500 mt-0.5">
+                                    Valid {opt.validity} • 3% Cashback
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <p className="font-extrabold text-sm text-emerald-600">{opt.price}</p>
+                                <span className="text-[10px] text-slate-400 group-hover:text-indigo-600 flex items-center gap-0.5 justify-end mt-0.5 font-medium">
+                                  Select <ChevronRight className="h-3 w-3 inline" />
+                                </span>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        /* Generic / Action Buttons */
+                        <div className="grid grid-cols-1 gap-1.5">
+                          {msg.options.map((opt) => (
+                            <button
+                              key={opt.id}
+                              onClick={() => handleSendMessage(opt.id)}
+                              className="w-full text-left bg-white/95 hover:bg-white text-[#2a2652] hover:text-indigo-900 rounded-2xl px-4 py-2.5 shadow-sm transition hover:scale-[1.01] active:scale-[0.99] border border-white/40 flex items-center justify-between group"
+                            >
                               <div>
-                                <p className="font-semibold text-xs text-[#2a2652] group-hover:text-indigo-900">
-                                  {opt.label}
-                                </p>
+                                <div className="flex items-center gap-2">
+                                  <p className="font-semibold text-xs text-[#2a2652] group-hover:text-indigo-900">
+                                    {opt.label}
+                                  </p>
+                                  {opt.badge && (
+                                    <span className="px-1.5 py-0.2 text-[9px] font-bold rounded bg-emerald-500/10 text-emerald-600">
+                                      {opt.badge}
+                                    </span>
+                                  )}
+                                </div>
                                 {opt.sub && (
-                                  <p className="text-[11px] text-slate-500 group-hover:text-slate-700">
+                                  <p className="text-[11px] text-slate-500 group-hover:text-slate-700 mt-0.5">
                                     {opt.sub}
                                   </p>
                                 )}
                               </div>
-                            </div>
-                            <ChevronRight className="h-4 w-4 text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition" />
-                          </button>
-                        ))}
-                      </div>
+                              <ChevronRight className="h-4 w-4 text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition" />
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

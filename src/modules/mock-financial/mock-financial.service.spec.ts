@@ -357,7 +357,57 @@ describe('MockFinancialService', () => {
   });
 
   // -------------------------------------------------------------------------
-  // 7. Saved Recipients Listing
+  // 7. Gifting
+  // -------------------------------------------------------------------------
+
+  describe('simulateGift()', () => {
+    it('simulates a cash gift with double-entry posting', async () => {
+      mockPrisma.transaction.create.mockResolvedValueOnce({ id: 'gft-1' });
+
+      const result = await service.simulateGift(
+        'cust-001',
+        'CASH',
+        '2348098765432',
+        500_000n,
+        undefined,
+        undefined,
+        'Happy Birthday',
+      );
+
+      expect(result.status).toBe('SUCCESSFUL');
+      expect(result.giftType).toBe('CASH');
+      expect(result.recipientPhone).toBe('2348098765432');
+      expect(result.note).toBe('Happy Birthday');
+      expect(mockLedgerService.postJournal).toHaveBeenCalledTimes(1);
+    });
+
+    it('simulates an airtime gift with VAS commission split', async () => {
+      mockPrisma.transaction.create.mockResolvedValueOnce({ id: 'gft-2' });
+
+      const result = await service.simulateGift(
+        'cust-001',
+        'AIRTIME',
+        '2348098765432',
+        100_000n,
+        'MTN',
+        undefined,
+        'Enjoy',
+      );
+
+      expect(result.giftType).toBe('AIRTIME');
+      expect(result.network).toBe('MTN');
+      expect(mockLedgerService.postJournal).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects an invalid recipient phone number', async () => {
+      await expect(
+        service.simulateGift('cust-001', 'CASH', 'abc', 500_000n),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 8. Saved Recipients Listing
   // -------------------------------------------------------------------------
 
   describe('listSavedRecipients()', () => {

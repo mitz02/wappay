@@ -30,6 +30,7 @@ import {
   MockDepositResult,
   MockWithdrawalResult,
   MockVasResult,
+  MockGiftResult,
   MockRecipientSummary,
 } from '../interfaces/mock-financial.interface';
 import {
@@ -1165,7 +1166,126 @@ export class MockFinancialService {
   }
 
   // ---------------------------------------------------------------------------
-  // 8. Saved Recipients
+  // 8. Simulated Gifting
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Simulates sending a gift (airtime, data, or cash) to another WhatsApp number.
+   * Airtime and data earn VAS commission; cash is settled at face value.
+   */
+  async simulateGift(
+    customerId: string,
+    giftType: 'AIRTIME' | 'DATA' | 'CASH',
+    recipientPhone: string,
+    amountKobo: bigint,
+    network?: string,
+    planCode?: string,
+    note?: string,
+  ): Promise<MockGiftResult> {
+    if (amountKobo <= 0n) {
+      throw new FinancialInvariantException('Gift amount must be strictly positive.');
+    }
+
+    const cleanRecipient = recipientPhone.replace(/[\s+\-()]/g, '');
+    if (!/^\d{10,15}$/.test(cleanRecipient)) {
+      throw new BadRequestException('A valid recipient phone number is required.');
+    }
+
+    const currentBalance = (await this.getBalance(customerId)).availableBalanceKobo;
+    if (currentBalance < amountKobo) {
+      throw new InsufficientFundsException('Insufficient balance for gift.');
+    }
+
+    const cleanNetwork = network ? network.toUpperCase() : undefined;
+    const reference = `MOCK_GFT_${Date.now()}_${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+    const description =
+      giftType === 'CASH'
+        ? 'Cash Gift'
+        : giftType === 'DATA'
+          ? `${cleanNetwork} ${planCode} Data Gift`
+          : `${cleanNetwork} Airtime Gift`;
+
+    const txn = await this.prisma.transaction.create({
+      data: {
+        internalReference: reference,
+        idempotencyKey: `IDEMP_${reference}`,
+        customerId,
+        type:
+          giftType === 'CASH'
+            ? TransactionType.TRANSFER
+            : giftType === 'DATA'
+              ? TransactionType.DATA_PURCHASE
+              : TransactionType.AIRTIME_PURCHASE,
+        state: TransactionState.SUCCESSFUL,
+        amountKobo,
+        feeKobo: 0n,
+        currency: 'NGN',
+        destinationAccountNumber: cleanRecipient,
+        recipientAlias: note ? `Gift: ${note}` : description,
+        isSimulated: true,
+      },
+    });
+
+    const commissionKobo =
+      giftType === 'AIRTIME'
+        ? (amountKobo * 2n) / 100n
+        : giftType === 'DATA'
+          ? (amountKobo * 3n) / 100n
+          : 0n;
+    const providerCostKobo = amountKobo - commissionKobo;
+
+    const entries: Array<{
+      accountNumber: string;
+      direction: EntryDirection;
+      amountKobo: bigint;
+    }> = [
+      {
+        accountNumber: `21000-${customerId}`,
+        direction: EntryDirection.DEBIT,
+        amountKobo,
+      },
+      {
+        accountNumber: CHART_OF_ACCOUNTS.PROVIDER_CLEARING,
+        direction: EntryDirection.CREDIT,
+        amountKobo: providerCostKobo,
+      },
+    ];
+
+    if (commissionKobo > 0n) {
+      entries.push({
+        accountNumber: CHART_OF_ACCOUNTS.VAS_COMMISSION_REVENUE,
+        direction: EntryDirection.CREDIT,
+        amountKobo: commissionKobo,
+      });
+    }
+
+    await this.ledgerService.postJournal({
+      reference: `JRN_${reference}`,
+      idempotencyKey: `IDEMP_JRN_${reference}`,
+      description: `Simulated ${description} to ${cleanRecipient}`,
+      transactionId: txn.id,
+      entries,
+    });
+
+    const newBalance = (await this.getBalance(customerId)).availableBalanceKobo;
+
+    return {
+      transactionId: txn.id,
+      reference,
+      giftType,
+      recipientPhone: cleanRecipient,
+      amountDebitedKobo: amountKobo,
+      newBalanceKobo: newBalance,
+      network: cleanNetwork,
+      plan: planCode,
+      note,
+      status: 'SUCCESSFUL',
+      isSimulated: true,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // 9. Saved Recipients
   // ---------------------------------------------------------------------------
 
   /**

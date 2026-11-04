@@ -140,6 +140,18 @@ describe('AIAssistantService', () => {
         status: 'SUCCESSFUL',
         isSimulated: true,
       }),
+      simulateGift: jest.fn().mockResolvedValue({
+        transactionId: 'gft-1',
+        reference: 'MOCK_GFT_001',
+        giftType: 'AIRTIME',
+        recipientPhone: '2348098765432',
+        amountDebitedKobo: 200_000n,
+        newBalanceKobo: 248_000_00n,
+        network: 'MTN',
+        note: 'Happy Birthday',
+        status: 'SUCCESSFUL',
+        isSimulated: true,
+      }),
       listSavedRecipients: jest.fn().mockResolvedValue([
         {
           id: 'rec-1',
@@ -292,7 +304,88 @@ describe('AIAssistantService', () => {
   });
 
   // -------------------------------------------------------------------------
-  // 9. Saved Recipients
+  // 9. Gift Shop Wizard
+  // -------------------------------------------------------------------------
+
+  it('opens the gift shop with all catalog options', async () => {
+    const reply = await service.processCustomerMessage('2348012345678', 'Gift');
+
+    expect(reply).toContain('SELECT GIFT TO SEND');
+    expect(reply).toContain('MTN ₦500 Airtime');
+    expect(reply).toContain('Airtel ₦2,000 Airtime');
+    expect(reply).toContain('₦5,000 Cash Gift');
+  });
+
+  it('completes a gift end-to-end after number, recipient, and SEND', async () => {
+    const menu = await service.processCustomerMessage('2348012345678', 'Gift');
+    expect(menu).toContain('SELECT GIFT TO SEND');
+
+    const recipientPrompt = await service.processCustomerMessage('2348012345678', '3');
+    expect(recipientPrompt).toContain('MTN ₦2,000 Airtime');
+    expect(recipientPrompt).toContain('Who is this gift for?');
+
+    const summary = await service.processCustomerMessage(
+      '2348012345678',
+      '08098765432 Happy Birthday',
+    );
+    expect(summary).toContain('Gift Summary');
+    expect(summary).toContain('2348098765432');
+    expect(summary).toContain('Happy Birthday');
+
+    const receipt = await service.processCustomerMessage('2348012345678', 'SEND');
+    expect(mockFinancialService.simulateGift).toHaveBeenCalledWith(
+      'cust-123',
+      'AIRTIME',
+      '2348098765432',
+      200_000n,
+      'MTN',
+      undefined,
+      'Happy Birthday',
+    );
+    expect(receipt).toContain('GIFT SENT!');
+    expect(receipt).toContain('MOCK_GFT_001');
+  });
+
+  it('supports interactive list row IDs and self-gifting', async () => {
+    await service.processCustomerMessage('2348012345678', 'Gift shop');
+
+    const prompt = await service.processCustomerMessage('2348012345678', 'GIFT_9');
+    expect(prompt).toContain('₦5,000 Cash Gift');
+
+    const summary = await service.processCustomerMessage('2348012345678', 'me');
+    expect(summary).toContain('2348012345678');
+
+    const receipt = await service.processCustomerMessage('2348012345678', 'send');
+    expect(mockFinancialService.simulateGift).toHaveBeenCalledWith(
+      'cust-123',
+      'CASH',
+      '2348012345678',
+      500_000n,
+      undefined,
+      undefined,
+      'A little something for you 🎁',
+    );
+    expect(receipt).toContain('GIFT SENT!');
+  });
+
+  it('recovers an interactive gift selection after a cold start', async () => {
+    const prompt = await service.processCustomerMessage('2348012345678', 'GIFT_6');
+
+    expect(prompt).toContain('MTN ₦1,000 1.5GB Data');
+    expect(prompt).toContain('Who is this gift for?');
+  });
+
+  it('cancels an in-progress gift without debiting funds', async () => {
+    await service.processCustomerMessage('2348012345678', 'Gift');
+    await service.processCustomerMessage('2348012345678', '1');
+
+    const reply = await service.processCustomerMessage('2348012345678', 'cancel');
+    expect(reply).toContain('Gift Cancelled');
+    expect(mockFinancialService.simulateGift).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // 10. Saved Recipients
   // -------------------------------------------------------------------------
 
   it('lists saved recipients when requested', async () => {

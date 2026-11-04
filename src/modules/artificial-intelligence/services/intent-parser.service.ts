@@ -10,6 +10,7 @@ export enum MockFinancialIntent {
   WITHDRAWAL = 'WITHDRAWAL',
   DEPOSIT = 'DEPOSIT',
   LIST_RECIPIENTS = 'LIST_RECIPIENTS',
+  GIFTING = 'GIFTING',
   CONFIRM_TRANSACTION = 'CONFIRM_TRANSACTION',
   CANCEL_TRANSACTION = 'CANCEL_TRANSACTION',
   HELP = 'HELP',
@@ -62,7 +63,21 @@ export class IntentParserService {
       };
     }
 
-    // 3. Deposit — checked BEFORE balance enquiry to prevent "top up balance" being routed
+    // 3. Gift Shop — checked before deposit/airtime so "send a gift" opens the catalog
+    if (
+      /\bgifts?\b/i.test(lower) ||
+      /\bgifting\b/i.test(lower) ||
+      lower.includes('gift shop') ||
+      lower.includes('gift card')
+    ) {
+      return {
+        intent: MockFinancialIntent.GIFTING,
+        confidence: 0.96,
+        rawText: raw,
+      };
+    }
+
+    // 4. Deposit — checked BEFORE balance enquiry to prevent "top up balance" being routed
     //    to BALANCE_ENQUIRY because it contains the word "balance".
     if (lower.startsWith('deposit') || lower.includes('fund account') || lower.includes('top up balance')) {
       const amountKobo = this.extractMonetaryAmount(raw);

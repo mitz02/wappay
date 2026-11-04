@@ -87,6 +87,20 @@ export interface MockVasResult {
   isSimulated: true;
 }
 
+export interface MockGiftResult {
+  transactionId: string;
+  reference: string;
+  giftType: 'AIRTIME' | 'DATA' | 'CASH';
+  recipientPhone: string;
+  amountDebitedKobo: bigint;
+  newBalanceKobo: bigint;
+  network?: string;
+  plan?: string;
+  note?: string;
+  status: 'SUCCESSFUL';
+  isSimulated: true;
+}
+
 export interface MockRecipientSummary {
   id: string;
   accountName: string;

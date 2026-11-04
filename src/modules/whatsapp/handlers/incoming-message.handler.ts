@@ -10,6 +10,7 @@ import {
 } from '../whatsapp.constants';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import { AIAssistantService } from '../../artificial-intelligence/services/ai-assistant.service';
+import { GIFT_CATALOG } from '../../artificial-intelligence/gift.constants';
 
 @Injectable()
 export class IncomingMessageHandler {
@@ -105,10 +106,10 @@ export class IncomingMessageHandler {
     ) {
       const interactive = (message as any).interactive;
       textBody =
-        interactive?.button_reply?.title ||
         interactive?.button_reply?.id ||
-        interactive?.list_reply?.title ||
         interactive?.list_reply?.id ||
+        interactive?.button_reply?.title ||
+        interactive?.list_reply?.title ||
         '';
       this.logger.log(`Received interactive button/list selection from ${maskedPhone}: "${textBody}"`);
     } else {
@@ -144,7 +145,28 @@ export class IncomingMessageHandler {
 
     // 5. Dispatch Reply via WhatsApp Cloud API (With interactive buttons/list when applicable)
     try {
-      if (replyText.includes('SELECT MOBILE NETWORK')) {
+      if (replyText.includes('SELECT GIFT')) {
+        await this.messageService.sendInteractiveList(
+          normalizedPhone,
+          'Choose a gift to send to someone special:',
+          'Select Gift',
+          [
+            {
+              title: 'WAPPay Gift Shop',
+              rows: GIFT_CATALOG.map((gift) => ({
+                id: gift.id,
+                title: gift.name,
+                description: gift.description,
+              })),
+            },
+          ],
+          '🎁 Gift Shop',
+          'WAPPay Instant Banking',
+          message.id,
+        ).catch(async () => {
+          await this.messageService.sendReply(normalizedPhone, replyText, message.id);
+        });
+      } else if (replyText.includes('SELECT MOBILE NETWORK')) {
         await this.messageService.sendInteractiveList(
           normalizedPhone,
           '⚡ *Instant Airtime Recharge*\nPlease choose your mobile network provider below:',

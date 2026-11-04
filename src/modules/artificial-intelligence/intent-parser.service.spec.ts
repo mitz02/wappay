@@ -286,7 +286,27 @@ describe('IntentParserService', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 12. General / Fallback
+  // 12. Gifting
+  // ---------------------------------------------------------------------------
+
+  describe('GIFTING intent', () => {
+    it.each(['gift', 'gifts', 'gifting', 'open the gift shop', 'send a gift', 'buy a gift card'])(
+      'recognizes "%s" as GIFTING',
+      async (input) => {
+        const result = await service.parseIntent(input);
+        expect(result.intent).toBe(MockFinancialIntent.GIFTING);
+        expect(result.confidence).toBeGreaterThanOrEqual(0.95);
+      },
+    );
+
+    it('does not treat "gifted" as a gift command', async () => {
+      const result = await service.parseIntent('I gifted my friend yesterday');
+      expect(result.intent).not.toBe(MockFinancialIntent.GIFTING);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 13. General / Fallback
   // ---------------------------------------------------------------------------
 
   describe('GENERAL intent (fallback)', () => {

@@ -8,11 +8,21 @@ import { IntentParserService, MockFinancialIntent } from './intent-parser.servic
 import { MockFinancialService } from '../../mock-financial/services/mock-financial.service';
 import { WAPPAY_SYSTEM_PROMPT, AI_CONSTANTS } from '../ai.constants';
 import { formatKoboToNaira } from '../../../common/types';
+import { GIFT_CATALOG, GiftCatalogItem } from '../gift.constants';
+import { MockGiftResult } from '../../mock-financial/interfaces/mock-financial.interface';
+
+interface PendingGiftSession {
+  stage: 'SELECT_GIFT' | 'SELECT_RECIPIENT' | 'CONFIRM';
+  gift?: GiftCatalogItem;
+  recipientPhone?: string;
+  message?: string;
+}
 
 @Injectable()
 export class AIAssistantService {
   private readonly logger = new Logger(AIAssistantService.name);
   private readonly pendingAirtimeSessions = new Map<string, { network?: string; amountKobo?: bigint; targetPhone?: string; stage: 'SELECT_NETWORK' | 'SELECT_AMOUNT' }>();
+  private readonly pendingGiftSessions = new Map<string, PendingGiftSession>();
 
   constructor(
     @Inject('CHAT_PROVIDER') private readonly chatProvider: IChatProvider,
@@ -46,8 +56,32 @@ export class AIAssistantService {
       contactName,
     );
 
-    // 2. Check for active multi-step Airtime Wizard session
+    // 2. Check for an active multi-step Gift Wizard session
     const lowerInput = trimmedMessage.toLowerCase();
+    const giftSession = this.pendingGiftSessions.get(customer.id);
+    if (giftSession) {
+      return await this.continueGiftSession(
+        customer,
+        normalizedPhone,
+        trimmedMessage,
+        giftSession,
+      );
+    }
+
+    // Recover an interactive gift selection if the in-memory session was lost
+    // (for example, after a serverless cold start).
+    if (/^GIFT_[1-9]$/i.test(trimmedMessage)) {
+      const recovered: PendingGiftSession = { stage: 'SELECT_GIFT' };
+      this.pendingGiftSessions.set(customer.id, recovered);
+      return await this.continueGiftSession(
+        customer,
+        normalizedPhone,
+        trimmedMessage,
+        recovered,
+      );
+    }
+
+    // 3. Check for active multi-step Airtime Wizard session
     const airtimeSession = this.pendingAirtimeSessions.get(customer.id);
 
     if (airtimeSession) {
@@ -133,7 +167,15 @@ export class AIAssistantService {
           break;
         }
 
-        // --- C. Balance Enquiry ---
+        // --- C. Gift Shop ---
+        case MockFinancialIntent.GIFTING: {
+          this.pendingAirtimeSessions.delete(customer.id);
+          this.pendingGiftSessions.set(customer.id, { stage: 'SELECT_GIFT' });
+          reply = this.buildGiftMenu();
+          break;
+        }
+
+        // --- D. Balance Enquiry ---
         case MockFinancialIntent.BALANCE_ENQUIRY: {
           const balance = await this.mockFinancialService.getBalance(customer.id);
           reply =
@@ -416,6 +458,7 @@ export class AIAssistantService {
         `• _"Deposit ₦50,000"_\n` +
         `• _"Withdraw ₦10,000"_\n` +
         `• _"Buy ₦1,000 airtime"_\n` +
+        `• _"Gift"_ (open the gift shop)\n` +
         `• _"Who are my saved recipients?"_`
       );
     }
@@ -500,6 +543,197 @@ export class AIAssistantService {
       `═══════════════════════════════════════\n` +
       `_Thank you for choosing WAPPay Instant Banking!_`
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Gift Shop Wizard
+  // ---------------------------------------------------------------------------
+
+  private async continueGiftSession(
+    customer: any,
+    normalizedPhone: string,
+    input: string,
+    session: PendingGiftSession,
+  ): Promise<string> {
+    const lower = input.trim().toLowerCase();
+
+    if (['cancel', 'abort', 'stop', 'no'].includes(lower)) {
+      this.pendingGiftSessions.delete(customer.id);
+      return '❌ *Gift Cancelled*\n\nNo funds were debited from your account. Reply *gift* to start again.';
+    }
+
+    switch (session.stage) {
+      case 'SELECT_GIFT': {
+        const gift = this.resolveGiftChoice(input);
+        if (!gift) {
+          return `${this.buildGiftMenu()}\n\n⚠️ *Please choose a gift between 1 and 9.*`;
+        }
+        session.gift = gift;
+        session.stage = 'SELECT_RECIPIENT';
+        this.pendingGiftSessions.set(customer.id, session);
+        return this.buildGiftRecipientPrompt(gift);
+      }
+
+      case 'SELECT_RECIPIENT': {
+        const selfGift = /\b(me|myself|self)\b/i.test(input);
+        const recipientPhone = selfGift
+          ? normalizedPhone
+          : this.extractBeneficiaryPhone(input);
+
+        if (!recipientPhone) {
+          return (
+            `⚠️ *Recipient Needed*\n\n` +
+            `Reply with a valid Nigerian WhatsApp number, for example:\n` +
+            `_08012345678 Happy Birthday!_\n\n` +
+            `Or reply *me* to gift yourself.\n` +
+            `_Type "cancel" to exit._`
+          );
+        }
+
+        session.recipientPhone = recipientPhone;
+        session.message = this.extractGiftNote(input, selfGift);
+        session.stage = 'CONFIRM';
+        this.pendingGiftSessions.set(customer.id, session);
+        return this.buildGiftConfirmation(session);
+      }
+
+      case 'CONFIRM': {
+        if (['send', 'yes', 'confirm', 'proceed', 'ok'].includes(lower)) {
+          this.pendingGiftSessions.delete(customer.id);
+          return await this.executeGift(customer, session);
+        }
+        return '👉 Reply *SEND* to confirm the gift or *CANCEL* to abort.';
+      }
+    }
+
+    return this.buildGiftMenu();
+  }
+
+  private async executeGift(
+    customer: any,
+    session: PendingGiftSession,
+  ): Promise<string> {
+    const gift = session.gift!;
+
+    try {
+      const result = await this.mockFinancialService.simulateGift(
+        customer.id,
+        gift.kind,
+        session.recipientPhone!,
+        gift.amountKobo,
+        gift.network,
+        gift.plan,
+        session.message,
+      );
+      return this.buildGiftReceipt(gift, result);
+    } catch (err: any) {
+      this.logger.warn(
+        `Gift simulation failed for customer ${customer.id}: ${err.message}`,
+      );
+      return (
+        `╔═══════════════════════════════════════╗\n` +
+        `║          ⚠️ GIFT COULD NOT SEND        ║\n` +
+        `╚═══════════════════════════════════════╝\n\n` +
+        `${err.message}\n\n` +
+        `💡 Reply *gift* to try again or *deposit* to top up your wallet.`
+      );
+    }
+  }
+
+  private buildGiftMenu(): string {
+    const lines = GIFT_CATALOG.map((gift, idx) => `[${idx + 1}] ${gift.name}`);
+
+    return (
+      `╔═══════════════════════════════════════╗\n` +
+      `║          🎁 SELECT GIFT TO SEND       ║\n` +
+      `╚═══════════════════════════════════════╝\n\n` +
+      `Send a little something to someone special over WhatsApp.\n\n` +
+      `${lines.join('\n')}\n\n` +
+      `👉 *Reply with 1-9 or tap the list below.*\n` +
+      `_Type "cancel" to exit._`
+    );
+  }
+
+  private buildGiftRecipientPrompt(gift: GiftCatalogItem): string {
+    return (
+      `🎁 *${gift.name}*\n\n` +
+      `Who is this gift for?\n\n` +
+      `Reply with the recipient's WhatsApp number and an optional note:\n` +
+      `_08012345678 Happy Birthday!_\n\n` +
+      `Or reply *me* to gift yourself.\n` +
+      `_Type "cancel" to exit._`
+    );
+  }
+
+  private buildGiftConfirmation(session: PendingGiftSession): string {
+    const gift = session.gift!;
+
+    return (
+      `🎁 *Gift Summary*\n\n` +
+      `• *Gift:* ${gift.name}\n` +
+      `• *Recipient:* \`${session.recipientPhone}\`\n` +
+      `• *Note:* ${session.message}\n` +
+      `• *Amount:* *${formatKoboToNaira(gift.amountKobo)}*\n\n` +
+      `Reply *SEND* to confirm or *CANCEL* to abort.`
+    );
+  }
+
+  private buildGiftReceipt(
+    gift: GiftCatalogItem,
+    result: MockGiftResult,
+  ): string {
+    return (
+      `╔═══════════════════════════════════════╗\n` +
+      `║             🎁 GIFT SENT!             ║\n` +
+      `╚═══════════════════════════════════════╝\n\n` +
+      `✅ *Your gift is on its way!*\n\n` +
+      `📋 *Gift Receipt:*\n` +
+      `• 🎁 *Gift:* ${gift.name}\n` +
+      `• 📱 *Recipient:* \`${result.recipientPhone}\`\n` +
+      `• 💬 *Note:* ${result.note || 'A little something for you 🎁'}\n` +
+      `• 💸 *Amount Debited:* *${formatKoboToNaira(result.amountDebitedKobo)}*\n` +
+      `• 🔖 *Reference:* \`${result.reference}\`\n\n` +
+      `💳 *New Available Balance:* *${formatKoboToNaira(result.newBalanceKobo)}*\n` +
+      `═══════════════════════════════════════\n` +
+      `_Simulated gift delivered on WAPPay mock rails._`
+    );
+  }
+
+  private resolveGiftChoice(input: string): GiftCatalogItem | undefined {
+    const raw = input.trim().toLowerCase();
+
+    const byId = GIFT_CATALOG.find((gift) => gift.id.toLowerCase() === raw);
+    if (byId) {
+      return byId;
+    }
+
+    const indexMatch = raw.match(/^(?:gift[_ -]?)?([1-9])$/);
+    if (indexMatch) {
+      return GIFT_CATALOG[Number(indexMatch[1]) - 1];
+    }
+
+    return GIFT_CATALOG.find(
+      (gift) =>
+        gift.name.toLowerCase() === raw ||
+        gift.name.toLowerCase().includes(raw),
+    );
+  }
+
+  private extractGiftNote(input: string, selfGift: boolean): string {
+    const phoneMatch = input.match(/\b(0[789][01]\d{8}|234[789][01]\d{8})\b/);
+    let note = phoneMatch ? input.replace(phoneMatch[0], ' ') : input;
+
+    if (selfGift) {
+      note = note.replace(/\b(me|myself|self)\b/gi, ' ');
+    }
+    note = note.replace(/^\s*(?:to|for)\s+/i, ' ');
+    note = note.replace(/^[\s\-–—:,.]+/, '').trim();
+
+    if (!note) {
+      return 'A little something for you 🎁';
+    }
+
+    return note.slice(0, 120);
   }
 
   private resolveNetworkChoice(input: string): string | undefined {

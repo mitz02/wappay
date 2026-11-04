@@ -498,7 +498,34 @@ export class AIAssistantService {
       }
     } catch (err: any) {
       this.logger.warn(`Financial operation exception for customer ${customer.id}: ${err.message}`);
-      reply = `⚠️ *Action Failed*\n\n${err.message}`;
+      const isInsufficientFunds =
+        err.message?.toLowerCase().includes('insufficient') ||
+        err.name === 'InsufficientFundsException';
+      if (isInsufficientFunds) {
+        // Extract balance info from error if available
+        const balMatch = err.message?.match(/balance[:\s]+₦?([\d,]+\.?\d*)/i);
+        const reqMatch = err.message?.match(/required[:\s]+₦?([\d,]+\.?\d*)/i);
+        const balLine = balMatch ? `💰 *Available Balance:* *₦${balMatch[1]}*\n` : '';
+        const reqLine = reqMatch ? `💸 *Amount Required:* *₦${reqMatch[1]}*\n` : '';
+        reply =
+          `╔═══════════════════════════════════════╗\n` +
+          `║       ⚠️  INSUFFICIENT BALANCE        ║\n` +
+          `╚═══════════════════════════════════════╝\n\n` +
+          `❌ *Transaction Declined*\n\n` +
+          `Your wallet balance is too low to complete this transaction.\n\n` +
+          balLine +
+          reqLine +
+          `\n💡 *To top up your wallet, reply:*\n` +
+          `👉 _"Deposit ₦50,000"_\n\n` +
+          `_Type *help* for more options or *balance* to check your wallet._`;
+      } else {
+        reply =
+          `╔═══════════════════════════════════════╗\n` +
+          `║           ⚠️  ACTION FAILED           ║\n` +
+          `╚═══════════════════════════════════════╝\n\n` +
+          `❌ *${err.message}*\n\n` +
+          `_Please try again or type *help* to see available options._`;
+      }
     }
 
     // 4. Persist Turns in Conversation Context
@@ -855,7 +882,7 @@ export class AIAssistantService {
             recipientPhone: session.recipientPhone!,
             plan: gift.plan,
           }).url
-        : `https://wappay.ng/gift/claim#${result.transactionId}`;
+        : `https://wappay-ten.vercel.app/gift/${result.transactionId}`;
 
       return this.buildGiftReceipt(gift, result, linkUrl, session);
     } catch (err: any) {
@@ -943,15 +970,24 @@ export class AIAssistantService {
     url: string,
     session: PendingGiftSession,
   ): string {
+    const senderLabel = session.anonymous
+      ? 'a secret admirer'
+      : session.senderName;
+
     return (
       `╔═══════════════════════════════════════╗\n` +
       `║          🎁 GIFT CREATED!             ║\n` +
       `╚═══════════════════════════════════════╝\n\n` +
-      `Your *${gift.name}* gift is ready to claim.\n\n` +
+      `Your *${gift.name}* gift is ready to share.\n\n` +
+      `*Send them this message:*\n` +
+      `┌─────────────────────────────┐\n` +
+      `│ You received a Gift from *${senderLabel}*.\n` +
+      `│ Click to view the message\n` +
+      `│ and claim it:\n` +
+      `│ ${url}\n` +
+      `└─────────────────────────────┘\n\n` +
       `💌 "${session.message}"\n` +
-      `👤 From: *${session.anonymous ? 'Anonymous' : session.senderName}*\n` +
       `📱 For: \`${result.recipientPhone}\`\n\n` +
-      `🔗 *Claim link:*\n${url}\n\n` +
       `💸 *Amount Debited:* *${formatKoboToNaira(result.amountDebitedKobo)}*\n` +
       `🔖 *Reference:* \`${result.reference}\`\n` +
       `💳 *New Balance:* *${formatKoboToNaira(result.newBalanceKobo)}*\n` +

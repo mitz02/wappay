@@ -36,18 +36,22 @@ export interface GiftLink {
   data: GiftTokenData;
 }
 
+const SHORT_CODE_LENGTH = 8;
+const SHORT_CODE_ALPHABET =
+  'ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+const SHORT_CODE_PATTERN = new RegExp(
+  `^[${SHORT_CODE_ALPHABET}]{${SHORT_CODE_LENGTH}}$`,
+);
+
 @Injectable()
 export class GiftService {
   private readonly logger = new Logger(GiftService.name);
-  private readonly secret =
-    process.env.GIFT_LINK_SECRET ||
-    process.env.WHATSAPP_APP_SECRET ||
-    process.env.JWT_ACCESS_SECRET ||
-    'wappay-dev-gift-secret';
   private readonly baseUrl = (
     process.env.PUBLIC_APP_URL || 'https://wappay-ten.vercel.app'
   ).replace(/\/+$/, '');
   private readonly claimedGiftIds = new Set<string>();
+  /** Short code → gift payload. Keeps claim URLs tiny. */
+  private readonly giftStore = new Map<string, GiftTokenData>();
 
   createGiftLink(input: GiftLinkInput): GiftLink {
     const data: GiftTokenData = {
@@ -65,10 +69,8 @@ export class GiftService {
       ...(input.plan ? { p: input.plan } : {}),
     };
 
-    const encoded = Buffer.from(JSON.stringify(data), 'utf8').toString(
-      'base64url',
-    );
-    const token = `${encoded}.${this.sign(encoded)}`;
+    const token = this.generateShortCode();
+    this.giftStore.set(token, data);
 
     return {
       token,
@@ -78,38 +80,17 @@ export class GiftService {
   }
 
   verifyToken(token: string): GiftTokenData | null {
-    const parts = token.split('.');
-    if (parts.length !== 2) return null;
-
-    const [encoded, signature] = parts;
-    if (!encoded || !signature) return null;
-    if (!this.isValidSignature(encoded, signature)) return null;
-
-    try {
-      const payload = JSON.parse(
-        Buffer.from(encoded, 'base64url').toString('utf8'),
-      ) as GiftTokenData;
-
-      if (payload?.v !== 1) return null;
-      if (!['AIRTIME', 'DATA', 'MONEY'].includes(payload.k)) return null;
-      if (
-        typeof payload.id !== 'string' ||
-        typeof payload.n !== 'string' ||
-        typeof payload.a !== 'string' ||
-        typeof payload.m !== 'string' ||
-        typeof payload.s !== 'string' ||
-        typeof payload.r !== 'string' ||
-        typeof payload.ref !== 'string'
-      ) {
-        return null;
-      }
-
-      BigInt(payload.a);
-      return payload;
-    } catch (err: any) {
-      this.logger.warn(`Rejected malformed gift token: ${err.message}`);
+    if (!token || !SHORT_CODE_PATTERN.test(token)) {
       return null;
     }
+
+    const data = this.giftStore.get(token);
+    if (!data) {
+      this.logger.warn(`Rejected unknown gift code: ${token}`);
+      return null;
+    }
+
+    return data;
   }
 
   claim(giftId: string): void {
@@ -120,19 +101,12 @@ export class GiftService {
     return this.claimedGiftIds.has(giftId);
   }
 
-  private sign(value: string): string {
-    return crypto.createHmac('sha256', this.secret).update(value).digest('base64url');
-  }
-
-  private isValidSignature(value: string, signature: string): boolean {
-    const expected = this.sign(value);
-    const expectedBuffer = Buffer.from(expected);
-    const providedBuffer = Buffer.from(signature);
-
-    if (expectedBuffer.length !== providedBuffer.length) {
-      return false;
+  private generateShortCode(): string {
+    const bytes = crypto.randomBytes(SHORT_CODE_LENGTH);
+    let code = '';
+    for (let i = 0; i < SHORT_CODE_LENGTH; i++) {
+      code += SHORT_CODE_ALPHABET[bytes[i] % SHORT_CODE_ALPHABET.length];
     }
-
-    return crypto.timingSafeEqual(expectedBuffer, providedBuffer);
+    return this.giftStore.has(code) ? this.generateShortCode() : code;
   }
 }

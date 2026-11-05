@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, Inject, forwardRef } from '@nestjs/common';
 import { GroqService } from '../artificial-intelligence/services/groq.service';
 import { AIAssistantService } from '../artificial-intelligence/services/ai-assistant.service';
 export interface VoiceMessagePayload {
@@ -26,6 +26,7 @@ export class VoiceService {
 
   constructor(
     private readonly groqService: GroqService,
+    @Inject(forwardRef(() => AIAssistantService))
     private readonly aiAssistantService: AIAssistantService,
   ) {}
 

@@ -30,7 +30,7 @@ import { IncomingMessageHandler } from './handlers/incoming-message.handler';
   imports: [
     ConfigModule,
     forwardRef(() => AIModule),
-    VoiceModule,
+    forwardRef(() => VoiceModule),
     forwardRef(() => WhatsAppFlowsModule),
     WalletModule,
   ],

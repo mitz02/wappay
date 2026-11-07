@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #0a0f0c;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: #10dc6b;
+  color: #00381b;
+}
+
+@layer components {
+  .container-site {
+    @apply mx-auto w-full max-w-6xl px-5 sm:px-8;
+  }  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-brand-600 px-6 py-3.5 text-sm font-semibold text-white shadow-[0_8px_24px_-6px_rgba(5,189,87,0.5)] transition-all duration-200 hover:bg-brand-700 hover:shadow-[0_12px_32px_-6px_rgba(5,189,87,0.55)] active:scale-[0.98];
+  }
+  .btn-whatsapp {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-[#25d366] px-6 py-3.5 text-sm font-semibold text-white shadow-[0_8px_24px_-6px_rgba(37,211,102,0.55)] transition-all duration-200 hover:bg-[#1ebe5b] hover:shadow-[0_12px_32px_-6px_rgba(37,211,102,0.6)] active:scale-[0.98];
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-6 py-3.5 text-sm font-semibold text-slate-700 transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 active:scale-[0.98];
+  }
+  .eyebrow {
+    @apply inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3.5 py-1.5 text-xs font-semibold uppercase tracking-widest text-brand-700;
+  }
+  .card {
+    @apply rounded-2xl border border-slate-100 bg-white p-6 shadow-card transition-all duration-300 hover:-translate-y-1 hover:border-brand-100 hover:shadow-card-hover;
+  }
+}
+
+/* Feature accordion auto-advance progress bar */
+.feature-progress {
+  width: 100%;
+  transform-origin: left center;
+  animation: feature-progress-fill 6s linear forwards;
+}
+
+@keyframes feature-progress-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* How-it-works speed lines */
+.speed-line {
+  position: absolute;
+  height: 5px;
+  width: 40%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, #34d399, #86efac 42%, transparent);
+  animation: speed-glint 2.4s ease-in-out infinite;
+}
+
+.speed-line--reverse {
+  background: linear-gradient(270deg, #34d399, #86efac 42%, transparent);
+  animation-name: speed-glint-reverse;
+}
+
+.speed-line:nth-child(2) {
+  animation-delay: 0.3s;
+}
+.speed-line:nth-child(3) {
+  animation-delay: 0.6s;
+}
+.speed-line:nth-child(4) {
+  animation-delay: 0.9s;
+}
+.speed-line:nth-child(5) {
+  animation-delay: 0.15s;
+}
+.speed-line:nth-child(6) {
+  animation-delay: 0.45s;
+}
+.speed-line:nth-child(7) {
+  animation-delay: 0.75s;
+}
+.speed-line:nth-child(8) {
+  animation-delay: 1.05s;
+}
+
+@keyframes speed-glint {
+  0%,
+  100% {
+    transform: translateX(-12%);
+    opacity: 0.7;
+  }
+  50% {
+    transform: translateX(12%);
+    opacity: 1;
+  }
+}
+
+@keyframes speed-glint-reverse {
+  0%,
+  100% {
+    transform: translateX(12%);
+    opacity: 0.7;
+  }
+  50% {
+    transform: translateX(-12%);
+    opacity: 1;
+  }
+}

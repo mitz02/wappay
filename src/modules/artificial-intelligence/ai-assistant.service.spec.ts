@@ -438,11 +438,28 @@ describe('AIAssistantService', () => {
   });
 
   // -------------------------------------------------------------------------
-  // 10. General Conversational / Greetings via Groq
+  // 10. Greetings → Services Welcome / General Conversational via Groq
   // -------------------------------------------------------------------------
 
-  it('calls Groq for general conversational greetings', async () => {
+  it('shows the services welcome menu when the user says hi', async () => {
     const reply = await service.processCustomerMessage('2348012345678', 'Hello there');
+
+    expect(mockChatProvider.generateChatResponse).not.toHaveBeenCalled();
+    expect(reply).toContain('W E L C O M E');
+    expect(reply).toContain('Airtime & Data');
+    expect(reply).toContain('Send & Receive Money — Nigeria');
+    expect(reply).toContain('Cameroon');
+    expect(reply).toContain('Ghana');
+    expect(reply).toContain('Pay China Suppliers');
+    expect(reply).toContain('Hi Adebayo');
+    expect(reply).toContain('from WappPay');
+  });
+
+  it('calls Groq for general conversational questions', async () => {
+    const reply = await service.processCustomerMessage(
+      '2348012345678',
+      "What's the weather like in Lagos?",
+    );
 
     expect(mockChatProvider.generateChatResponse).toHaveBeenCalledTimes(1);
     expect(reply).toContain('Hello Adebayo! How can I help you today?');

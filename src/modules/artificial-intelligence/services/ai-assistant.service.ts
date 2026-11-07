@@ -756,8 +756,13 @@ export class AIAssistantService {
           break;
         }
 
-        // --- K. General Conversational / Greetings / Help ---
-        case MockFinancialIntent.HELP:
+        // --- K. Greetings & Help → Services Welcome ---
+        case MockFinancialIntent.HELP: {
+          reply = this.buildServicesWelcome(customer);
+          break;
+        }
+
+        // --- L. General Conversational ---
         case MockFinancialIntent.GENERAL:
         default: {
           reply = await this.generateConversationalReply(customer, trimmedMessage);
@@ -1356,6 +1361,51 @@ export class AIAssistantService {
       }
       return `🗑️ *Contact not deleted*\n\n${err.message || 'Unknown error.'}`;
     }
+  }
+
+  /**
+   * Services welcome shown when a user says hi / hello / hey / help.
+   * WhatsApp supports *bold*, _italic_ and emojis only — the design is built
+   * with those plus separators for a clean, card-like layout.
+   */
+  private buildServicesWelcome(customer: any): string {
+    const firstName = (customer?.fullName || '').split(' ')[0] || 'there';
+
+    return (
+      `✨ *W E L C O M E   T O   W A P P A Y* ✨\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `👋 Hi ${firstName}! Great to have you here.\n` +
+      `Here is what we do for you:\n\n` +
+
+      `📱 *1. Airtime & Data*\n` +
+      `Instant airtime top-ups and data bundles on\n` +
+      `MTN 🟡 · Airtel 🔴 · Glo 🟢 · 9mobile ⚫\n` +
+      `👉 _"Buy ₦1,000 airtime"_ · _"Buy 2GB data"_\n\n` +
+
+      `🇳🇬 *2. Send & Receive Money — Nigeria*\n` +
+      `Send money to any Nigerian bank account or\n` +
+      `to another WappPay user, and receive money too.\n` +
+      `👉 _"Send ₦5,000 to Mum"_\n\n` +
+
+      `🌍 *3. Send & Receive Money — Africa*\n` +
+      `Cameroon 🇨🇲 · Ghana 🇬🇭 · Kenya 🇰🇪 · South Africa 🇿🇦\n` +
+      `Send and receive across African borders with ease.\n` +
+      `👉 _"Pay Cameroon supplier"_\n\n` +
+
+      `🇨🇳 *4. Pay China Suppliers*\n` +
+      `Settle payments to your China suppliers and\n` +
+      `factories quickly and conveniently.\n` +
+      `👉 _"Pay China supplier"_\n\n` +
+
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `⚡ *Quick commands*\n` +
+      `• *balance* — check your wallet\n` +
+      `• *deposit* — top up your wallet\n` +
+      `• *history* — recent transactions\n` +
+      `• *contacts* — manage beneficiaries\n` +
+      `• *menu* — open main menu\n\n` +
+      `💬 Type any service or command to get started!`
+    );
   }
 
   private async handleMainMenu(customer: any, normalizedPhone: string): Promise<string> {

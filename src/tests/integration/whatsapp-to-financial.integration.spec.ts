@@ -71,13 +71,17 @@ function buildServiceGraph(groqReply = 'Hello! How can I help you today?') {
 // ============================================================================
 
 describe('[Integration] General Conversation', () => {
-  it('greets the customer and passes the message through Groq', async () => {
+  it('shows the services welcome menu on greetings instead of calling Groq', async () => {
     const { assistant, chatProvider } = buildServiceGraph('Welcome to WAPPay! I can help with balances, transfers and more.');
 
     const reply = await assistant.processCustomerMessage('2348012345678', 'Hello');
 
-    expect(chatProvider.generateChatResponse).toHaveBeenCalledTimes(1);
-    expect(reply).toContain('WAPPay');
+    expect(chatProvider.generateChatResponse).not.toHaveBeenCalled();
+    expect(reply).toContain('Airtime & Data');
+    expect(reply).toContain('Send & Receive Money — Nigeria');
+    expect(reply).toContain('Cameroon');
+    expect(reply).toContain('Pay China Suppliers');
+    expect(reply).toContain('from WappPay');
   });
 
   it('explains capabilities when asked "What can you do?"', async () => {
@@ -87,8 +91,9 @@ describe('[Integration] General Conversation', () => {
 
     const reply = await assistant.processCustomerMessage('2348012345678', 'What can you do?');
 
-    expect(chatProvider.generateChatResponse).toHaveBeenCalledTimes(1);
-    expect(reply).toBeTruthy();
+    expect(chatProvider.generateChatResponse).not.toHaveBeenCalled();
+    expect(reply).toContain('Quick commands');
+    expect(reply).toContain('balance');
   });
 
   it('explains how the service works via Groq for a general question', async () => {
@@ -109,7 +114,7 @@ describe('[Integration] General Conversation', () => {
     const { assistant, chatProvider } = buildServiceGraph();
     (chatProvider.generateChatResponse as jest.Mock).mockRejectedValueOnce(new Error('Groq timeout'));
 
-    const reply = await assistant.processCustomerMessage('2348012345678', 'Hello there');
+    const reply = await assistant.processCustomerMessage('2348012345678', 'Tell me something interesting');
 
     // Fallback from generateConversationalReply catch block
     expect(reply).toContain('WAPPay');

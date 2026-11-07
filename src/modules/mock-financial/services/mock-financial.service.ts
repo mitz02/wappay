@@ -120,9 +120,18 @@ export class MockFinancialService {
       throw new NotFoundException(`Mock customer ${customerId} not found.`);
     }
 
-    const account = await this.prisma.ledgerAccount.findUnique({
+    let account = await this.prisma.ledgerAccount.findUnique({
       where: { accountNumber: `21000-${customerId}` },
     });
+
+    if (!account) {
+      // Registered customers may not have a ledger account yet — provision it
+      // (with the starter balance) so balance enquiries always resolve.
+      await this.ensureCustomerAccount(customer.id, customer.fullName);
+      account = await this.prisma.ledgerAccount.findUnique({
+        where: { accountNumber: `21000-${customerId}` },
+      });
+    }
 
     const balanceKobo = account?.balanceKobo ?? 0n;
     const virtualAccount = customer.accountReference || `01${customer.whatsappNumber.slice(-8)}`;

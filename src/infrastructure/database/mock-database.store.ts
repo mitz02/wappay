@@ -407,6 +407,21 @@ export class MockDatabaseStore {
       count: async (args: { where?: any } = {}) => {
         return collection.filter((r) => this.matchRecord(r, args.where)).length;
       },
+      delete: async (args: { where: any }) => {
+        const index = collection.findIndex((r) => this.matchRecord(r, args.where));
+        if (index === -1) {
+          throw new Error(`Record to delete not found in ${name}`);
+        }
+        const [removed] = collection.splice(index, 1);
+        return { ...removed };
+      },
+      deleteMany: async (args: { where?: any } = {}) => {
+        const remaining = collection.filter((r) => !this.matchRecord(r, args.where));
+        const count = collection.length - remaining.length;
+        collection.length = 0;
+        collection.push(...remaining);
+        return { count };
+      },
     };
   }
 

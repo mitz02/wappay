@@ -3,8 +3,11 @@ import { WalletService } from './wallet.service';
 describe('WalletService', () => {
   let service: WalletService;
   let mockPrisma: any;
+  let mockLedger: any;
+  let ledgerBalance: bigint;
 
   beforeEach(() => {
+    ledgerBalance = BigInt(0);
     mockPrisma = {
       wallet: {
         findUnique: jest.fn(),
@@ -17,9 +20,34 @@ describe('WalletService', () => {
         findMany: jest.fn(),
         count: jest.fn(),
       },
+      ledgerAccount: {
+        findUnique: jest.fn(),
+        create: jest.fn(),
+      },
+      transaction: {
+        upsert: jest.fn(),
+      },
       $transaction: jest.fn(),
     };
-    service = new WalletService(mockPrisma);
+    mockLedger = {
+      postJournal: jest.fn().mockImplementation(async () => ({ id: 'jrn-1' })),
+      initializeChartOfAccounts: jest.fn().mockResolvedValue(undefined),
+    };
+    service = new WalletService(mockPrisma, mockLedger);
+
+    // Ledger reads: system escrow always exists; customer account follows the
+    // mutable ledgerBalance so the post-journal re-read reflects the credit.
+    mockPrisma.ledgerAccount.findUnique.mockImplementation(async ({ where }: any) => {
+      if (where.accountNumber === '11100') {
+        return { accountNumber: '11100', type: 'ASSET', balanceKobo: BigInt(0) };
+      }
+      return { accountNumber: where.accountNumber, balanceKobo: ledgerBalance };
+    });
+    mockPrisma.ledgerAccount.create.mockImplementation(async ({ data }: any) => ({
+      accountNumber: data.accountNumber,
+      type: data.type,
+      balanceKobo: data.balanceKobo,
+    }));
   });
 
   describe('createWallet', () => {
@@ -58,7 +86,9 @@ describe('WalletService', () => {
         id: 'wallet-1',
         customerId: 'cust-1',
         walletType: 'MOCK',
+        currency: 'NGN',
         balanceKobo: BigInt(500000),
+        status: 'ACTIVE',
       };
 
       mockPrisma.wallet.findUnique.mockResolvedValue(existingWallet);
@@ -71,7 +101,7 @@ describe('WalletService', () => {
   });
 
   describe('deposit', () => {
-    it('should deposit funds atomically and record transaction', async () => {
+    it('should post a ledger journal and record the deposit', async () => {
       const wallet = {
         id: 'wallet-1',
         customerId: 'cust-1',
@@ -79,7 +109,6 @@ describe('WalletService', () => {
         status: 'ACTIVE',
       };
 
-      const updatedWallet = { ...wallet, balanceKobo: BigInt(500000) };
       const transaction = {
         id: 'txn-1',
         reference: 'DEP_test_123',
@@ -89,23 +118,40 @@ describe('WalletService', () => {
         status: 'COMPLETED',
       };
 
+      mockPrisma.wallet.findUnique.mockResolvedValue(wallet);
       mockPrisma.$transaction.mockImplementation(async (fn: any) => {
         const tx = {
           wallet: {
-            findUnique: jest.fn().mockResolvedValue(wallet),
-            update: jest.fn().mockResolvedValue(updatedWallet),
+            update: jest.fn().mockImplementation(async ({ data }: any) => ({ ...wallet, ...data })),
           },
           walletTransaction: {
             create: jest.fn().mockResolvedValue(transaction),
           },
+          transaction: {
+            upsert: jest.fn().mockResolvedValue(undefined),
+          },
         };
         return fn(tx);
+      });
+
+      mockLedger.postJournal.mockImplementation(async () => {
+        ledgerBalance += BigInt(500000);
+        return { id: 'jrn-1' };
       });
 
       const result = await service.deposit('cust-1', BigInt(500000));
 
       expect(result.transaction.reference).toMatch(/^DEP_/);
       expect(result.newBalanceKobo).toBe(BigInt(500000));
+      expect(mockLedger.postJournal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reference: expect.stringMatching(/^JRN_DEP_/),
+          entries: expect.arrayContaining([
+            expect.objectContaining({ accountNumber: '11100', direction: 'DEBIT' }),
+            expect.objectContaining({ accountNumber: '21000-cust-1', direction: 'CREDIT' }),
+          ]),
+        }),
+      );
       expect(mockPrisma.$transaction).toHaveBeenCalled();
     });
 
@@ -134,6 +180,7 @@ describe('WalletService', () => {
       };
       const wallet = { id: 'wallet-1', customerId: 'cust-1', balanceKobo: BigInt(500000) };
 
+      ledgerBalance = BigInt(500000);
       mockPrisma.walletTransaction.findUnique.mockResolvedValue(existingTxn);
       mockPrisma.wallet.findUnique.mockResolvedValue(wallet);
 
@@ -141,18 +188,38 @@ describe('WalletService', () => {
 
       expect(result.transaction).toEqual(existingTxn);
       expect(result.newBalanceKobo).toBe(BigInt(500000));
-      // Should not call $transaction for idempotent replay
+      // Should not call $transaction or post a journal for an idempotent replay
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockLedger.postJournal).not.toHaveBeenCalled();
     });
   });
 
   describe('getBalanceKobo', () => {
-    it('should return wallet balance', async () => {
+    it('should return the ledger-synced wallet balance', async () => {
       const wallet = { id: 'w1', customerId: 'c1', balanceKobo: BigInt(750000) };
+      ledgerBalance = BigInt(750000);
       mockPrisma.wallet.findUnique.mockResolvedValue(wallet);
 
       const balance = await service.getBalanceKobo('c1');
       expect(balance).toBe(BigInt(750000));
+    });
+
+    it('should sync the wallet mirror from the ledger', async () => {
+      const wallet = { id: 'w1', customerId: 'c1', balanceKobo: BigInt(0) };
+      ledgerBalance = BigInt(12345);
+      mockPrisma.wallet.findUnique.mockResolvedValue(wallet);
+      mockPrisma.wallet.update.mockImplementation(async ({ data }: any) => ({
+        ...wallet,
+        ...data,
+      }));
+
+      const balance = await service.getBalanceKobo('c1');
+
+      expect(balance).toBe(BigInt(12345));
+      expect(mockPrisma.wallet.update).toHaveBeenCalledWith({
+        where: { id: 'w1' },
+        data: { balanceKobo: BigInt(12345) },
+      });
     });
 
     it('should throw if wallet not found', async () => {
@@ -163,7 +230,7 @@ describe('WalletService', () => {
 
   describe('getTransactions', () => {
     it('should return paginated transactions', async () => {
-      const wallet = { id: 'w1', customerId: 'c1' };
+      const wallet = { id: 'w1', customerId: 'c1', balanceKobo: BigInt(0), status: 'ACTIVE' };
       const transactions = [
         { id: 't1', reference: 'DEP_1', type: 'DEPOSIT', amountKobo: BigInt(100000) },
         { id: 't2', reference: 'DEP_2', type: 'DEPOSIT', amountKobo: BigInt(200000) },

@@ -165,7 +165,7 @@ describe('[Integration] Account Enquiries', () => {
 
     const reply = await assistant.processCustomerMessage('2348012345678', 'Show my last five transactions');
 
-    expect(reply).toContain('Recent Simulated Transactions');
+    expect(reply).toContain('Recent Transactions');
     // Seeded transaction references from mock-database.store.ts
     expect(reply).toMatch(/HIST_TXN_\d+/);
   });
@@ -175,7 +175,7 @@ describe('[Integration] Account Enquiries', () => {
 
     const reply = await assistant.processCustomerMessage('2348012345678', 'Show my last 10 transactions');
 
-    expect(reply).toContain('Recent Simulated Transactions');
+    expect(reply).toContain('Recent Transactions');
     // Adebayo has exactly 10 seeded txns — all 10 should appear
     const matches = reply.match(/HIST_TXN_/g) || [];
     expect(matches.length).toBeGreaterThanOrEqual(5);
@@ -186,7 +186,7 @@ describe('[Integration] Account Enquiries', () => {
 
     const reply = await assistant.processCustomerMessage('2348012345678', 'Who are my saved recipients?');
 
-    expect(reply).toContain('Your Saved Recipients:');
+    expect(reply).toContain('Your Saved Contacts:');
     expect(reply).toContain('Jane Adeleke');
     // Bank from seed data
     expect(reply).toMatch(/Guaranty Trust/i);
@@ -533,7 +533,7 @@ describe('[Integration] Cross-Customer Isolation', () => {
     const tudeReply = await assistant.processCustomerMessage('2348034567890', 'Show my transactions');
 
     // Babatunde has no seeded transactions — should get the "no transactions" message
-    expect(tudeReply).toContain('no recorded simulated transactions');
+    expect(tudeReply).toContain('no recorded transactions');
   });
 
   it('Chioma\'s pending transfer does not bleed into Babatunde\'s confirmation', async () => {

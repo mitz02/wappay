@@ -10,6 +10,9 @@ export enum MockFinancialIntent {
   WITHDRAWAL = 'WITHDRAWAL',
   DEPOSIT = 'DEPOSIT',
   LIST_RECIPIENTS = 'LIST_RECIPIENTS',
+  ADD_CONTACT = 'ADD_CONTACT',
+  DELETE_CONTACT = 'DELETE_CONTACT',
+  EDIT_CONTACT = 'EDIT_CONTACT',
   GIFTING = 'GIFTING',
   REGISTER = 'REGISTER',
   CONFIRM_TRANSACTION = 'CONFIRM_TRANSACTION',
@@ -30,6 +33,11 @@ export interface ParsedFinancialIntent {
   limit?: number;
   reference?: string;
   confirmationWord?: string;
+  editField?: 'alias' | 'name' | 'accountNumber';
+  newValue?: string;
+  contactName?: string;
+  accountNumber?: string;
+  bankName?: string;
   rawText: string;
 }
 
@@ -128,13 +136,43 @@ export class IntentParserService {
       };
     }
 
-    // 5. Saved Recipients Listing
+    // 5. Edit Contact / Recipient — checked BEFORE listing so "edit contact mum"
+    //    never falls through to the contacts list.
+    const editContact = this.parseEditContact(raw, lower);
+    if (editContact) {
+      return editContact;
+    }
+
+    // 5a. Delete Contact — before listing so "delete contact mum" is never
+    //     mistaken for a contact-list request.
+    const deleteContact = this.parseDeleteContact(raw, lower);
+    if (deleteContact) {
+      return deleteContact;
+    }
+
+    // 5b. Add Contact — before listing/balance so "add contact …" is never
+    //     swallowed by other keyword rules.
+    const addContact = this.parseAddContact(raw, lower);
+    if (addContact) {
+      return addContact;
+    }
+
+    // 5c. Saved Recipients Listing (contacts)
     if (
       lower.includes('saved recipients') ||
       lower.includes('my recipients') ||
       lower.includes('saved contacts') ||
+      lower.includes('my contacts') ||
+      lower.includes('show contacts') ||
+      lower.includes('show my contacts') ||
+      lower.includes('list contacts') ||
+      lower.includes('contact list') ||
+      lower.includes('contacts list') ||
       lower.includes('beneficiaries') ||
-      lower.includes('who are my saved')
+      lower.includes('who are my saved') ||
+      lower.includes('who are my contacts') ||
+      lower === 'contacts' ||
+      lower === 'contact'
     ) {
       return {
         intent: MockFinancialIntent.LIST_RECIPIENTS,
@@ -353,8 +391,233 @@ export class IntentParserService {
   // Entity Extractors
   // ---------------------------------------------------------------------------
 
-  private extractMonetaryAmount(text: string): bigint | undefined {
-    const match = text.match(/(?:ngn|₦)?\s*([0-9kK,.]+)/i);
+  /**
+   * Parses contact/recipient edit commands, e.g.:
+   *   "edit contact mum"                     → target=mum, no value yet
+   *   "rename mum to mother"                 → target=mum, field=alias, value=mother
+   *   "edit contact mum to mother"           → target=mum, field=alias, value=mother
+   *   "change name of mum to Jane Okafor"    → target=mum, field=name, value=Jane Okafor
+   *   "update contact mum account number to 0123456789"
+   */
+  private parseEditContact(
+    raw: string,
+    lower: string,
+  ): ParsedFinancialIntent | undefined {
+    const verbMatch = lower.match(/^(?:please\s+)?(edit|update|change|rename|modify)\b\s*/);
+    if (!verbMatch) return undefined;
+
+    const verb = verbMatch[1];
+    const rest = raw.slice(verbMatch[0].length);
+    const restLower = rest.toLowerCase();
+
+    const mentionsSubject =
+      /\b(?:contact|contacts|recipient|recipients|beneficiary|beneficiaries|alias)\b/.test(
+        restLower,
+      );
+    const mentionsField = /\b(?:name|alias|account\s*(?:number|no\b|#)|acct)\b/.test(
+      restLower,
+    );
+    // "rename X to Y" is unambiguous even without the word "contact";
+    // "change name of mum to Jane" is too, thanks to the explicit field keyword.
+    if (!mentionsSubject && verb !== 'rename' && !mentionsField) return undefined;
+
+    // Field detection — only meaningful once a value is present.
+    let field: 'alias' | 'name' | 'accountNumber' = 'alias';
+    if (/\b(?:account\s*(?:number|no\b|#)|acct(?:\s*(?:number|no\b))?)\b/.test(lower)) {
+      field = 'accountNumber';
+    } else if (/\b(?:full\s+name|account\s+name|contact\s+name|display\s+name)\b/.test(lower)) {
+      field = 'name';
+    } else if (/\bname\b/.test(lower)) {
+      field = 'name';
+    } else if (/\balias\b/.test(lower)) {
+      field = 'alias';
+    }
+
+    // Split "<target> to <value>" on the first standalone "to".
+    let targetPart = rest;
+    let newValue: string | undefined;
+    const toIdx = restLower.search(/\s+to\s+/);
+    if (toIdx >= 0) {
+      targetPart = rest.slice(0, toIdx);
+      newValue = rest
+        .slice(toIdx)
+        .replace(/^\s+to\s+/i, '')
+        .trim();
+      if (newValue) {
+        newValue = newValue.replace(
+          /^(?:alias|name|account\s*(?:number|no\b)?)\s+/i,
+          '',
+        );
+      }
+    }
+
+    const noiseWords =
+      /\b(?:contact|contacts|recipient|recipients|beneficiary|beneficiaries|alias|name|full\s+name|account\s+name|contact\s+name|display\s+name|account\s*(?:number|no\b|#)?|acct(?:\s*(?:number|no\b))?|of|the|my|please)\b/gi;
+    const recipient = targetPart
+      .replace(/[:,]/g, ' ')
+      .replace(noiseWords, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return {
+      intent: MockFinancialIntent.EDIT_CONTACT,
+      confidence: 0.95,
+      recipient: recipient || undefined,
+      editField: field,
+      newValue: newValue || undefined,
+      rawText: raw,
+    };
+  }
+
+  /**
+   * Parses contact deletion commands, e.g.:
+   *   "delete contact mum"      → recipient=mum
+   *   "remove beneficiary john" → recipient=john
+   *   "delete my contact"       → recipient=undefined (assistant asks who)
+   */
+  private parseDeleteContact(
+    raw: string,
+    lower: string,
+  ): ParsedFinancialIntent | undefined {
+    const match = lower.match(
+      /^(?:please\s+)?(?:delete|remove|clear|erase)\b\s*/,
+    );
+    if (!match) return undefined;
+
+    const restLower = lower.slice(match[0].length);
+    const mentionsSubject =
+      /\b(?:contact|contacts|recipient|recipients|beneficiary|beneficiaries)\b/.test(
+        restLower,
+      );
+    if (!mentionsSubject) return undefined;
+
+    const noiseWords =
+      /\b(?:please|delete|remove|clear|erase|contact|contacts|recipient|recipients|beneficiary|beneficiaries|my|the|saved|from\s+my\s+list|list)\b/g;
+    const recipient = raw
+      .slice(match[0].length)
+      .replace(/[:,]/g, ' ')
+      .replace(noiseWords, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return {
+      intent: MockFinancialIntent.DELETE_CONTACT,
+      confidence: 0.96,
+      recipient: recipient || undefined,
+      rawText: raw,
+    };
+  }
+
+  /**
+   * Parses contact creation commands, e.g.:
+   *   "add contact mum 0123456789 GTB"           → name=mum, account, bank
+   *   "save contact Jane as jane"                 → name=Jane, alias=jane
+   *   "create a new contact for John"             → name=John (assistant asks for details)
+   *   "add beneficiary Chidi 0987654321 Access"   → full details
+   */
+  private parseAddContact(
+    raw: string,
+    lower: string,
+  ): ParsedFinancialIntent | undefined {
+    const match = lower.match(
+      /^(?:please\s+)?(?:add|save|create|new|register)\b\s*/,
+    );
+    if (!match) return undefined;
+
+    const restLower = lower.slice(match[0].length);
+    const mentionsSubject =
+      /\b(?:contact|contacts|recipient|recipients|beneficiary|beneficiaries)\b/.test(
+        restLower,
+      );
+    // "save 5000 to mum" / "save for later" are not contact commands.
+    if (!mentionsSubject) return undefined;
+
+    let rest = raw.slice(match[0].length);
+
+    // Optional "as <alias>" suffix.
+    let alias: string | undefined;
+    const asIdx = restLower.search(/\s+as\s+/);
+    if (asIdx >= 0) {
+      alias = rest.slice(asIdx).replace(/^\s+as\s+/i, '').trim().replace(/[.,]$/, '');
+      rest = rest.slice(0, asIdx);
+    }
+
+    // Strip command/subject noise to recover the remaining tokens.
+    const noiseWords =
+      /\b(?:please|add|save|create|new|register|a|an|contact|contacts|recipient|recipients|beneficiary|beneficiaries|for|my|the|saved)\b/gi;
+    const tokens = rest
+      .replace(/[:,]/g, ' ')
+      .replace(noiseWords, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .split(' ')
+      .filter(Boolean);
+
+    // "<name…> <10-digit account> <bank…>" — the account number splits the
+    // contact name from the bank name.
+    const accIdx = tokens.findIndex((t) => /^\d{10}$/.test(t));
+    const accountNumber = accIdx >= 0 ? tokens[accIdx] : undefined;
+
+    let contactName: string | undefined;
+    let bankName: string | undefined;
+
+    if (accIdx >= 0) {
+      contactName = tokens.slice(0, accIdx).join(' ') || undefined;
+      bankName = tokens.slice(accIdx + 1).join(' ') || undefined;
+    } else if (tokens.length > 1 && this.isBankToken(tokens[tokens.length - 1])) {
+      // "Jane Adeleke GTB" — a trailing bank word splits the name.
+      contactName = tokens.slice(0, -1).join(' ');
+      bankName = tokens[tokens.length - 1];
+    } else {
+      contactName = tokens.join(' ') || undefined;
+    }
+
+    if (!contactName && !accountNumber && !alias) return undefined;
+
+    return {
+      intent: MockFinancialIntent.ADD_CONTACT,
+      confidence: 0.95,
+      contactName: contactName || undefined,
+      accountNumber,
+      bankName,
+      recipient: alias || undefined,
+      newValue: alias,
+      rawText: raw,
+    };
+  }
+
+  /**
+   * True when a token is recognisable as (part of) a bank name.
+   */
+  private isBankToken(token: string): boolean {
+    const bankWords = [
+      'gtb',
+      'gtbank',
+      'access',
+      'zenith',
+      'uba',
+      'first',
+      'bank',
+      'fidelity',
+      'sterling',
+      'union',
+      'fcmb',
+      'polaris',
+      'stanbic',
+      'wema',
+      'unity',
+      'keystone',
+      'opay',
+      'kuda',
+      'palmpay',
+      'providus',
+      'moniepoint',
+      'fairmoney',
+    ];
+    return bankWords.includes(token.toLowerCase());
+  }
+
+  private extractMonetaryAmount(text: string): bigint | undefined {    const match = text.match(/(?:ngn|₦)?\s*([0-9kK,.]+)/i);
     if (!match) return undefined;
 
     const raw = match[1].replace(/,/g, '');

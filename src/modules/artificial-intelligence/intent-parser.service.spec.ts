@@ -283,6 +283,175 @@ describe('IntentParserService', () => {
       const result = await service.parseIntent('my saved contacts');
       expect(result.intent).toBe(MockFinancialIntent.LIST_RECIPIENTS);
     });
+
+    it('recognizes "show my contacts"', async () => {
+      const result = await service.parseIntent('show my contacts');
+      expect(result.intent).toBe(MockFinancialIntent.LIST_RECIPIENTS);
+    });
+
+    it('recognizes "contacts"', async () => {
+      const result = await service.parseIntent('contacts');
+      expect(result.intent).toBe(MockFinancialIntent.LIST_RECIPIENTS);
+    });
+
+    it('recognizes "list contacts"', async () => {
+      const result = await service.parseIntent('list contacts');
+      expect(result.intent).toBe(MockFinancialIntent.LIST_RECIPIENTS);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 11b. Edit Contact
+  // ---------------------------------------------------------------------------
+
+  describe('EDIT_CONTACT intent', () => {
+    it('parses "rename mum to mother" as alias rename', async () => {
+      const result = await service.parseIntent('rename mum to mother');
+      expect(result.intent).toBe(MockFinancialIntent.EDIT_CONTACT);
+      expect(result.recipient).toBe('mum');
+      expect(result.editField).toBe('alias');
+      expect(result.newValue).toBe('mother');
+    });
+
+    it('parses "edit contact mum to mother"', async () => {
+      const result = await service.parseIntent('edit contact mum to mother');
+      expect(result.intent).toBe(MockFinancialIntent.EDIT_CONTACT);
+      expect(result.recipient).toBe('mum');
+      expect(result.editField).toBe('alias');
+      expect(result.newValue).toBe('mother');
+    });
+
+    it('parses "edit contact mum" with target but no value', async () => {
+      const result = await service.parseIntent('edit contact mum');
+      expect(result.intent).toBe(MockFinancialIntent.EDIT_CONTACT);
+      expect(result.recipient).toBe('mum');
+      expect(result.newValue).toBeUndefined();
+    });
+
+    it('parses "edit contact" with no target', async () => {
+      const result = await service.parseIntent('edit contact');
+      expect(result.intent).toBe(MockFinancialIntent.EDIT_CONTACT);
+      expect(result.recipient).toBeUndefined();
+      expect(result.newValue).toBeUndefined();
+    });
+
+    it('parses "change name of mum to Jane Okafor" as name change', async () => {
+      const result = await service.parseIntent('change name of mum to Jane Okafor');
+      expect(result.intent).toBe(MockFinancialIntent.EDIT_CONTACT);
+      expect(result.recipient).toBe('mum');
+      expect(result.editField).toBe('name');
+      expect(result.newValue).toBe('Jane Okafor');
+    });
+
+    it('parses "update contact mum account number to 0123456789"', async () => {
+      const result = await service.parseIntent(
+        'update contact mum account number to 0123456789',
+      );
+      expect(result.intent).toBe(MockFinancialIntent.EDIT_CONTACT);
+      expect(result.recipient).toBe('mum');
+      expect(result.editField).toBe('accountNumber');
+      expect(result.newValue).toBe('0123456789');
+    });
+
+    it('does not hijack transfer commands', async () => {
+      const result = await service.parseIntent('Send 5000 naira to Mum');
+      expect(result.intent).toBe(MockFinancialIntent.TRANSFER);
+    });
+
+    it('does not hijack balance enquiries', async () => {
+      const result = await service.parseIntent('what is my balance');
+      expect(result.intent).toBe(MockFinancialIntent.BALANCE_ENQUIRY);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 11c. Add Contact
+  // ---------------------------------------------------------------------------
+
+  describe('ADD_CONTACT intent', () => {
+    it('parses "add contact Chidi 0123456789 GTB" with full details', async () => {
+      const result = await service.parseIntent('add contact Chidi 0123456789 GTB');
+      expect(result.intent).toBe(MockFinancialIntent.ADD_CONTACT);
+      expect(result.contactName).toBe('Chidi');
+      expect(result.accountNumber).toBe('0123456789');
+      expect(result.bankName).toBe('GTB');
+    });
+
+    it('parses "save contact Jane Adeleke 0987654321 Access Bank as jane"', async () => {
+      const result = await service.parseIntent(
+        'save contact Jane Adeleke 0987654321 Access Bank as jane',
+      );
+      expect(result.intent).toBe(MockFinancialIntent.ADD_CONTACT);
+      expect(result.contactName).toBe('Jane Adeleke');
+      expect(result.accountNumber).toBe('0987654321');
+      expect(result.bankName).toBe('Access Bank');
+      expect(result.recipient).toBe('jane');
+    });
+
+    it('parses "add contact Mum" with no account yet (wizard input)', async () => {
+      const result = await service.parseIntent('add contact Mum');
+      expect(result.intent).toBe(MockFinancialIntent.ADD_CONTACT);
+      expect(result.contactName).toBe('Mum');
+      expect(result.accountNumber).toBeUndefined();
+      expect(result.bankName).toBeUndefined();
+    });
+
+    it('splits a trailing bank word from a multi-word name', async () => {
+      const result = await service.parseIntent('add contact Jane Adeleke GTB');
+      expect(result.intent).toBe(MockFinancialIntent.ADD_CONTACT);
+      expect(result.contactName).toBe('Jane Adeleke');
+      expect(result.bankName).toBe('GTB');
+      expect(result.accountNumber).toBeUndefined();
+    });
+
+    it('does not hijack transfer commands', async () => {
+      const result = await service.parseIntent('Send 5000 naira to Mum');
+      expect(result.intent).toBe(MockFinancialIntent.TRANSFER);
+    });
+
+    it('does not treat "save for later" as a contact command', async () => {
+      const result = await service.parseIntent('save this for later');
+      expect(result.intent).not.toBe(MockFinancialIntent.ADD_CONTACT);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 11d. Delete Contact
+  // ---------------------------------------------------------------------------
+
+  describe('DELETE_CONTACT intent', () => {
+    it('parses "delete contact mum"', async () => {
+      const result = await service.parseIntent('delete contact mum');
+      expect(result.intent).toBe(MockFinancialIntent.DELETE_CONTACT);
+      expect(result.recipient).toBe('mum');
+    });
+
+    it('parses "remove beneficiary John"', async () => {
+      const result = await service.parseIntent('remove beneficiary John');
+      expect(result.intent).toBe(MockFinancialIntent.DELETE_CONTACT);
+      expect(result.recipient).toBe('John');
+    });
+
+    it('parses "delete my contact" without a target', async () => {
+      const result = await service.parseIntent('delete my contact');
+      expect(result.intent).toBe(MockFinancialIntent.DELETE_CONTACT);
+      expect(result.recipient).toBeUndefined();
+    });
+
+    it('does not hijack the cancel intent', async () => {
+      const result = await service.parseIntent('cancel');
+      expect(result.intent).toBe(MockFinancialIntent.CANCEL_TRANSACTION);
+    });
+
+    it('does not hijack transfer commands', async () => {
+      const result = await service.parseIntent('Send 5000 naira to Mum');
+      expect(result.intent).toBe(MockFinancialIntent.TRANSFER);
+    });
+
+    it('does not treat plain "delete" as a contact command', async () => {
+      const result = await service.parseIntent('delete');
+      expect(result.intent).not.toBe(MockFinancialIntent.DELETE_CONTACT);
+    });
   });
 
   // ---------------------------------------------------------------------------

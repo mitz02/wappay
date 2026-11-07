@@ -11,8 +11,14 @@ export interface FlowMessageOptions {
   footer?: string;
   startScreen?: string;
   initialData?: Record<string, any>;
+  replyToMessageId?: string;
 }
 
+/**
+ * Sends WhatsApp Flows (interactive in-chat forms with TextInput, Dropdown, etc.).
+ * Requires WHATSAPP_REGISTRATION_FLOW_ID / WHATSAPP_DEPOSIT_FLOW_ID after
+ * uploading the Flow JSON to Meta Flows (draft or published).
+ */
 @Injectable()
 export class FlowSenderService {
   private readonly logger = new Logger(FlowSenderService.name);
@@ -30,6 +36,7 @@ export class FlowSenderService {
       footer,
       startScreen,
       initialData,
+      replyToMessageId,
     } = options;
 
     if (!flowId) {
@@ -37,46 +44,22 @@ export class FlowSenderService {
       return false;
     }
 
-    // Build flow payload and send via WhatsApp message service
-    const payload: any = {
-      messaging_product: 'whatsapp',
-      to,
-      type: 'interactive',
-      interactive: {
-        type: 'flow',
-        body: { text: body },
-        action: {
-          name: 'flow',
-          parameters: {
-            flow_message_version: '3',
-            flow_action: 'navigate',
-            flow_token: flowToken,
-            flow_id: flowId,
-            flow_cta: cta.slice(0, 20),
-            mode: process.env.WHATSAPP_FLOW_MODE === 'draft' ? 'draft' : 'published',
-          },
-        },
-      },
-    };
-
-    if (header) {
-      payload.interactive.header = { type: 'text', text: header.slice(0, 60) };
-    }
-    if (footer) {
-      payload.interactive.footer = { text: footer.slice(0, 60) };
-    }
-    if (startScreen) {
-      payload.interactive.action.parameters.flow_action_payload = {
-        screen: startScreen,
-        data: initialData || {},
-      };
-    }
-
     try {
-      // Use the message service to send the raw payload
-      await (this.messageService as any).sendRawPayload?.(to, payload) ??
-        this.messageService.sendReply(to, body);
-      this.logger.log(`Flow sent to ${to}: flow=${flowId} token=${flowToken}`);
+      await this.messageService.sendInteractiveFlow({
+        to,
+        flowId,
+        flowToken,
+        cta,
+        body,
+        header,
+        footer: footer || 'from WappPay',
+        startScreen,
+        initialData,
+        replyToMessageId,
+      });
+      this.logger.log(
+        `Flow form sent to ${to}: flow=${flowId} screen=${startScreen || 'default'} token=${flowToken}`,
+      );
       return true;
     } catch (err: any) {
       this.logger.error(`Failed to send Flow to ${to}: ${err.message}`);

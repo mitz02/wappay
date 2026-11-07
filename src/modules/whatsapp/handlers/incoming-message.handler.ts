@@ -16,10 +16,13 @@ import {
 } from '../../gifting/gift.constants';
 import { DATA_PACKAGES } from '../../artificial-intelligence/data.constants';
 import { FlowSessionService } from '../../whatsapp-flows/services/flow-session.service';
+import { FlowSenderService } from '../../whatsapp-flows/services/flow-sender.service';
+import { RegistrationWizardService, WizardResult } from '../../whatsapp-flows/services/registration-wizard.service';
 import { RegistrationFlowHandler } from '../../whatsapp-flows/handlers/registration-flow.handler';
 import { DepositFlowHandler } from '../../whatsapp-flows/handlers/deposit-flow.handler';
 import { WalletService } from '../../wallet/wallet.service';
 import { withBrand, formatNaira } from '../../whatsapp-flows/utils/brand';
+import { getRegistrationFlowId } from '../../whatsapp-flows/flows/flow-definitions';
 
 @Injectable()
 export class IncomingMessageHandler {
@@ -33,6 +36,8 @@ export class IncomingMessageHandler {
     @Optional() private readonly voiceService?: VoiceService,
     @Optional() private readonly apiService?: WhatsAppApiService,
     @Optional() private readonly flowSessionService?: FlowSessionService,
+    @Optional() private readonly flowSenderService?: FlowSenderService,
+    @Optional() private readonly registrationWizard?: RegistrationWizardService,
     @Optional() private readonly registrationFlowHandler?: RegistrationFlowHandler,
     @Optional() private readonly depositFlowHandler?: DepositFlowHandler,
     @Optional() private readonly walletService?: WalletService,
@@ -151,7 +156,97 @@ export class IncomingMessageHandler {
       return WHATSAPP_TEST_RESPONSES.UNSUPPORTED_TYPE_REPLY;
     }
 
-    // 4. Process Message via AI Assistant Service (Groq AI)
+    // 4. Registration: WhatsApp Flow form (TextInput/Dropdown) first, wizard fallback
+    if (textBody) {
+      const upper = textBody.trim().toUpperCase();
+      const isGetStarted =
+        upper === 'REG_GET_STARTED' ||
+        upper === 'REGISTER' ||
+        upper === 'SIGN UP' ||
+        upper === 'SIGNUP';
+
+      if (isGetStarted || (this.registrationWizard && !this.registrationWizard.hasSession(normalizedPhone))) {
+        const profile = await this.prisma.customerProfile.findFirst({
+          where: { whatsappNumber: normalizedPhone },
+        });
+        const alreadyRegistered = profile?.registrationStatus === 'COMPLETED';
+
+        if (!alreadyRegistered) {
+          // Prefer real WhatsApp Flow form (in-chat TextInput/Dropdown)
+          const flowSent = await this.trySendRegistrationFlow(
+            normalizedPhone,
+            contactName,
+            message.id,
+          );
+          if (flowSent) {
+            this.registrationWizard?.clearSession(normalizedPhone);
+            const reply = withBrand(
+              'Please complete the registration form that just appeared.\n\nIt only takes a minute!',
+            );
+            return reply;
+          }
+
+          // Fallback: conversational wizard (reply buttons + typed text)
+          if (this.registrationWizard) {
+            if (isGetStarted) {
+              const wizardResult = await this.registrationWizard.handle(
+                normalizedPhone,
+                'REG_GET_STARTED',
+                contactName,
+              );
+              if (wizardResult) {
+                return this.dispatchWizardResult(
+                  normalizedPhone,
+                  wizardResult,
+                  message.id,
+                );
+              }
+            } else {
+              const welcome = this.registrationWizard.buildWelcome(contactName);
+              await this.messageService.sendInteractiveButtons(
+                normalizedPhone,
+                welcome.text,
+                welcome.buttons.map((b) => ({ id: b.id, title: b.title })),
+                undefined,
+                undefined,
+                message.id,
+              );
+              return welcome.text;
+            }
+          } else if (isGetStarted) {
+            const reply = withBrand(
+              'Welcome to WappPay! 👋\n\nPlease complete your registration to continue.',
+            );
+            await this.messageService.sendReply(normalizedPhone, reply, message.id);
+            return reply;
+          } else {
+            const reply = withBrand(
+              "Welcome to WappPay! 👋\n\nSend *register* to create your account.",
+            );
+            await this.messageService.sendReply(normalizedPhone, reply, message.id);
+            return reply;
+          }
+        }
+      }
+
+      // Active wizard session continues with typed text / button IDs
+      if (this.registrationWizard?.hasSession(normalizedPhone)) {
+        const wizardResult = await this.registrationWizard.handle(
+          normalizedPhone,
+          textBody,
+          contactName,
+        );
+        if (wizardResult) {
+          return this.dispatchWizardResult(
+            normalizedPhone,
+            wizardResult,
+            message.id,
+          );
+        }
+      }
+    }
+
+    // 5. Process Message via AI Assistant Service (Groq AI)
 
     this.logger.log(
       `Routing inbound message from ${maskedPhone} to Groq AI Assistant: "${textBody}"`,
@@ -329,6 +424,92 @@ export class IncomingMessageHandler {
   }
 
   /**
+   * Attempts to open the Meta WhatsApp Flow registration form (TextInput/Dropdown).
+   * Returns false when no flow ID is configured or send fails (caller falls back).
+   */
+  private async trySendRegistrationFlow(
+    normalizedPhone: string,
+    contactName: string | undefined,
+    messageId: string,
+  ): Promise<boolean> {
+    const flowId = getRegistrationFlowId();
+    if (!flowId || !this.flowSessionService || !this.flowSenderService) {
+      return false;
+    }
+
+    try {
+      const profile = await this.prisma.customerProfile.findFirst({
+        where: { whatsappNumber: normalizedPhone },
+      });
+      const flowToken = await this.flowSessionService.createSession(
+        'REGISTRATION',
+        profile?.id,
+        { whatsapp_number: normalizedPhone },
+      );
+
+      return await this.flowSenderService.sendFlow({
+        to: normalizedPhone,
+        flowId,
+        flowToken,
+        cta: 'Get Started',
+        body: 'Complete your WappPay registration in the form below.',
+        header: 'Join WappPay',
+        footer: 'from WappPay',
+        startScreen: 'WAPPPAY_SIGNUP',
+        initialData: {
+          full_name: contactName || '',
+          country: 'NG',
+        },
+        replyToMessageId: messageId,
+      });
+    } catch (err: any) {
+      this.logger.warn(
+        `Registration Flow send failed for ${maskedPhone(normalizedPhone)}: ${err.message}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Sends a registration-wizard reply: body text + optional reply buttons or list.
+   */
+  private async dispatchWizardResult(
+    normalizedPhone: string,
+    result: WizardResult,
+    messageId: string,
+  ): Promise<string> {
+    try {
+      if (result.list) {
+        await this.messageService.sendInteractiveList(
+          normalizedPhone,
+          result.list.body,
+          result.list.buttonText,
+          result.list.sections,
+          result.list.header,
+          undefined,
+          messageId,
+        );
+      } else if (result.buttons?.length) {
+        await this.messageService.sendInteractiveButtons(
+          normalizedPhone,
+          result.text,
+          result.buttons.map((b) => ({ id: b.id, title: b.title })),
+          undefined,
+          undefined,
+          messageId,
+        );
+      } else {
+        await this.messageService.sendReply(normalizedPhone, result.text, messageId);
+      }
+    } catch (err: unknown) {
+      const error = err as { message?: string };
+      this.logger.error(`Wizard dispatch failed for ${maskedPhone(normalizedPhone)}: ${error.message}`);
+      await this.messageService.sendReply(normalizedPhone, result.text, messageId).catch(() => undefined);
+    }
+    return result.text;
+  }
+
+  /**
    * Handle WhatsApp Flow (nfm_reply) submissions for registration and deposit.
    */
   private async handleFlowSubmission(
@@ -362,10 +543,21 @@ export class IncomingMessageHandler {
       `Flow submission from ${maskedPhone(normalizedPhone)}: token=${flowToken} keys=${Object.keys(responseData).join(',')}`,
     );
 
-    if (!flowToken) {
-      const reply = withBrand('Your session has expired. Please start again.');
+    // Terminal "complete" action from single-screen Flow may omit flow_token
+    // in some Meta versions — still process when registration payload is present.
+    const looksLikeRegistrationComplete =
+      Boolean(responseData.full_name) &&
+      Boolean(responseData.identity_method) &&
+      Boolean(responseData.identity_number);
+
+    if (!flowToken && !looksLikeRegistrationComplete) {
+      const reply = withBrand('Your session has expired. Please send "register" to start again.');
       await this.messageService.sendReply(normalizedPhone, reply, messageId);
       return reply;
+    }
+
+    if (looksLikeRegistrationComplete) {
+      return this.completeRegistrationFromFlow(normalizedPhone, responseData, contactName, messageId);
     }
 
     // Try to find the session to determine flow type
@@ -417,6 +609,8 @@ export class IncomingMessageHandler {
         responseData,
         normalizedPhone,
       );
+
+      this.registrationWizard?.clearSession(normalizedPhone);
 
       if (!result) {
         const reply = withBrand('Registration could not be completed. Please try again.');

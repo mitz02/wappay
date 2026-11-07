@@ -9,6 +9,7 @@ import { MockFinancialModule } from '../mock-financial/mock-financial.module';
 import { GiftingModule } from '../gifting/gifting.module';
 import { WhatsAppFlowsModule } from '../whatsapp-flows/whatsapp-flows.module';
 import { WalletModule } from '../wallet/wallet.module';
+import { RecipientsModule } from '../recipients/recipients.module';
 
 /**
  * AIModule
@@ -28,6 +29,7 @@ import { WalletModule } from '../wallet/wallet.module';
     GiftingModule,
     forwardRef(() => WhatsAppFlowsModule),
     WalletModule,
+    RecipientsModule,
   ],
   providers: [
     AIService,

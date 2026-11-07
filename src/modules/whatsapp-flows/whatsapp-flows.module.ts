@@ -3,6 +3,7 @@ import { FlowEndpointController } from './controllers/flow-endpoint.controller';
 import { FlowEncryptionService } from './services/flow-encryption.service';
 import { FlowSessionService } from './services/flow-session.service';
 import { FlowSenderService } from './services/flow-sender.service';
+import { RegistrationWizardService } from './services/registration-wizard.service';
 import { RegistrationFlowHandler } from './handlers/registration-flow.handler';
 import { DepositFlowHandler } from './handlers/deposit-flow.handler';
 import { WalletModule } from '../wallet/wallet.module';
@@ -15,6 +16,7 @@ import { WhatsAppModule } from '../whatsapp/whatsapp.module';
     FlowEncryptionService,
     FlowSessionService,
     FlowSenderService,
+    RegistrationWizardService,
     RegistrationFlowHandler,
     DepositFlowHandler,
   ],
@@ -22,6 +24,7 @@ import { WhatsAppModule } from '../whatsapp/whatsapp.module';
     FlowEncryptionService,
     FlowSessionService,
     FlowSenderService,
+    RegistrationWizardService,
     RegistrationFlowHandler,
     DepositFlowHandler,
   ],

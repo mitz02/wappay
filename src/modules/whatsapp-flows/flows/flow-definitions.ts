@@ -1,16 +1,141 @@
 /**
  * WhatsApp Flow JSON definitions for WAPPay.
  *
- * These are the official Flow JSON structures (version 7.3, data API 4.0)
- * ready to be uploaded to Meta's Flows API.
- *
- * WhatsApp green (#25D366) is WhatsApp's native primary button color —
- * Flow footer buttons render with WhatsApp's own styling automatically.
+ * Primary registration form matches the Meta Flows v5.0 single-screen
+ * structure (TextInput, Dropdown, OptIn, complete action) — upload
+ * `wappay-signup.json` to Meta Flows and set WHATSAPP_REGISTRATION_FLOW_ID.
  */
 
-// ─── Registration Flow ───────────────────────────────────────────────────────
+// ─── Registration Flow (Meta Flows v5.0 — real form inputs) ─────────────────
 
+/** Single-screen signup form: TextInput + Dropdown + OptIn + complete. */
 export const REGISTRATION_FLOW_JSON: Record<string, any> = {
+  version: '5.0',
+  screens: [
+    {
+      id: 'WAPPPAY_SIGNUP',
+      title: 'Join WappPay',
+      terminal: true,
+      data: {},
+      layout: {
+        type: 'SingleColumnLayout',
+        children: [
+          { type: 'TextHeading', text: 'Welcome to WappPay' },
+          {
+            type: 'TextSubheading',
+            text: 'Start receiving payments on WhatsApp in 30 seconds',
+          },
+          {
+            type: 'Form',
+            name: 'signup_form',
+            children: [
+              {
+                type: 'TextInput',
+                name: 'full_name',
+                label: 'Full Name',
+                required: true,
+                'input-type': 'text',
+                'helper-text': 'As it appears on your ID',
+                'min-chars': 2,
+                'max-chars': 100,
+              },
+              {
+                type: 'TextInput',
+                name: 'business_name',
+                label: 'Business Name',
+                required: true,
+                'input-type': 'text',
+              },
+              {
+                type: 'TextInput',
+                name: 'email',
+                label: 'Email Address',
+                required: true,
+                'input-type': 'email',
+              },
+              {
+                type: 'Dropdown',
+                name: 'business_type',
+                label: 'Business Type',
+                required: true,
+                'data-source': [
+                  { id: 'retail', title: 'Retail / Store' },
+                  { id: 'services', title: 'Services' },
+                  { id: 'food', title: 'Food & Restaurant' },
+                  { id: 'digital', title: 'Digital Products' },
+                  { id: 'other', title: 'Other' },
+                ],
+              },
+              {
+                type: 'Dropdown',
+                name: 'country',
+                label: 'Country',
+                required: true,
+                'data-source': [
+                  { id: 'NG', title: 'Nigeria' },
+                  { id: 'GH', title: 'Ghana' },
+                  { id: 'KE', title: 'Kenya' },
+                  { id: 'ZA', title: 'South Africa' },
+                ],
+                'init-value': 'NG',
+              },
+              {
+                type: 'RadioButtonsGroup',
+                name: 'identity_method',
+                label: 'Identity Verification',
+                required: true,
+                'data-source': [
+                  { id: 'NIN', title: 'NIN', description: 'National Identification Number' },
+                  { id: 'BVN', title: 'BVN', description: 'Bank Verification Number' },
+                ],
+              },
+              {
+                type: 'TextInput',
+                name: 'identity_number',
+                label: 'NIN / BVN Number',
+                required: true,
+                'input-type': 'text',
+                pattern: '^\\d{11}$',
+                'min-chars': 11,
+                'max-chars': 11,
+                'helper-text': 'Enter your 11-digit number',
+              },
+              {
+                type: 'OptIn',
+                name: 'terms',
+                label: 'I agree to WappPay Terms & Privacy',
+                required: true,
+              },
+            ],
+          },
+          {
+            type: 'Footer',
+            label: 'Create WappPay Account',
+            'on-click-action': {
+              name: 'complete',
+              payload: {
+                full_name: '${form.full_name}',
+                business_name: '${form.business_name}',
+                email: '${form.email}',
+                business_type: '${form.business_type}',
+                country: '${form.country}',
+                identity_method: '${form.identity_method}',
+                identity_number: '${form.identity_number}',
+                terms: '${form.terms}',
+              },
+            },
+          },
+        ],
+      },
+    },
+  ],
+};
+
+/**
+ * Multi-screen data_exchange variant (optional backend-driven navigation).
+ * Used when WHATSAPP_FLOW_STYLE=multi.
+ */
+export const REGISTRATION_FLOW_MULTI_JSON: Record<string, any> = {
   version: '7.3',
   data_api_version: '4.0',
   routing_model: {

@@ -95,6 +95,24 @@ export class WhatsAppMessageService {
     );
   }
 
+  /**
+   * Sends an interactive WhatsApp Flow message (in-chat form).
+   */
+  async sendInteractiveFlow(options: {
+    to: string;
+    flowId: string;
+    flowToken: string;
+    cta: string;
+    body: string;
+    header?: string;
+    footer?: string;
+    startScreen?: string;
+    initialData?: Record<string, any>;
+    replyToMessageId?: string;
+  }): Promise<WhatsAppApiResponse> {
+    return await this.apiService.sendInteractiveFlow(options);
+  }
+
   normalizePhoneNumber(phoneNumber: string): string {
     const digitsOnly = phoneNumber.replace(/[^0-9]/g, '');
 

@@ -15,12 +15,17 @@ import {
   resolveGiftCatalogItem,
 } from '../../gifting/gift.constants';
 import { GiftService } from '../../gifting/gift.service';
-import { MockGiftResult } from '../../mock-financial/interfaces/mock-financial.interface';
+import {
+  MockGiftResult,
+  MockTransactionSummary,
+} from '../../mock-financial/interfaces/mock-financial.interface';
 import { DATA_PACKAGES, DataPackage } from '../data.constants';
 import { withBrand, formatNaira } from '../../whatsapp-flows/utils/brand';
+import { ERROR_CODES } from '../../../common/constants';
 import { FlowSessionService } from '../../whatsapp-flows/services/flow-session.service';
 import { FlowSenderService } from '../../whatsapp-flows/services/flow-sender.service';
 import { WalletService } from '../../wallet/wallet.service';
+import { RecipientsService } from '../../recipients/recipients.service';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 
 interface PendingGiftSession {
@@ -46,6 +51,18 @@ export class AIAssistantService {
   private readonly pendingAirtimeSessions = new Map<string, { network?: string; amountKobo?: bigint; targetPhone?: string; stage: 'SELECT_NETWORK' | 'SELECT_AMOUNT' }>();
   private readonly pendingDataSessions = new Map<string, PendingDataSession>();
   private readonly pendingGiftSessions = new Map<string, PendingGiftSession>();
+  private readonly pendingEditContactSessions = new Map<
+    string,
+    { stage: 'SELECT_TARGET' | 'SELECT_FIELD'; target?: string }
+  >();
+  private readonly pendingAddContactSessions = new Map<
+    string,
+    { stage: 'SELECT_NAME' | 'SELECT_ACCOUNT' | 'SELECT_BANK'; contactName?: string; accountNumber?: string; bankName?: string; alias?: string }
+  >();
+  private readonly pendingDeleteContactSessions = new Map<
+    string,
+    { stage: 'SELECT_TARGET' | 'CONFIRM'; target?: string }
+  >();
 
   constructor(
     @Inject('CHAT_PROVIDER') private readonly chatProvider: IChatProvider,
@@ -57,6 +74,7 @@ export class AIAssistantService {
     @Optional() private readonly flowSessionService?: FlowSessionService,
     @Optional() private readonly flowSenderService?: FlowSenderService,
     @Optional() private readonly walletService?: WalletService,
+    @Optional() private readonly recipientsService?: RecipientsService,
   ) {}
 
   /**
@@ -227,6 +245,61 @@ export class AIAssistantService {
       }
     }
 
+    // 3c. Check for an active multi-step Contact Edit session
+    const editSession = this.pendingEditContactSessions.get(customer.id);
+    if (editSession) {
+      const cancelWords = ['cancel', 'abort', 'stop', 'no'];
+      const escapeWords = ['menu', 'start', 'home', 'help', 'main menu'];
+
+      if (cancelWords.includes(lowerInput)) {
+        this.pendingEditContactSessions.delete(customer.id);
+        return withBrand(
+          '✏️ *Contact edit cancelled.*\n\nWhat else would you like to do?',
+        );
+      }
+      if (!escapeWords.includes(lowerInput)) {
+        return await this.continueEditContactSession(
+          customer,
+          trimmedMessage,
+          editSession,
+        );
+      }
+      // Escape words (menu/help/…) drop the session and continue normal routing.
+      this.pendingEditContactSessions.delete(customer.id);
+    }
+
+    // 3d. Check for an active multi-step Add Contact session
+    const addSession = this.pendingAddContactSessions.get(customer.id);
+    if (addSession) {
+      const cancelWords = ['cancel', 'abort', 'stop', 'no'];
+      const escapeWords = ['menu', 'start', 'home', 'help', 'main menu'];
+
+      if (cancelWords.includes(lowerInput)) {
+        this.pendingAddContactSessions.delete(customer.id);
+        return withBrand('➕ *Contact not added.*\n\nWhat else would you like to do?');
+      }
+      if (!escapeWords.includes(lowerInput)) {
+        return await this.continueAddContactSession(customer, trimmedMessage, addSession);
+      }
+      this.pendingAddContactSessions.delete(customer.id);
+    }
+
+    // 3e. Check for an active Delete Contact (target/confirmation) session
+    const deleteSession = this.pendingDeleteContactSessions.get(customer.id);
+    if (deleteSession) {
+      const cancelWords = ['cancel', 'abort', 'stop', 'no', 'n'];
+      const escapeWords = ['menu', 'start', 'home', 'help', 'main menu'];
+
+      if (cancelWords.includes(lowerInput)) {
+        this.pendingDeleteContactSessions.delete(customer.id);
+        return withBrand('🗑️ *Contact not deleted.*\n\nWhat else would you like to do?');
+      }
+      if (!escapeWords.includes(lowerInput)) {
+        return await this.continueDeleteContactSession(customer, trimmedMessage, deleteSession);
+      }
+      this.pendingDeleteContactSessions.delete(customer.id);
+    }
+
     // 3. Parse Structured Intent & Entities
     const parsed = await this.intentParser.parseIntent(trimmedMessage);
     this.logger.log(
@@ -310,10 +383,10 @@ export class AIAssistantService {
                   flowId,
                   flowToken,
                   cta: 'Get Started',
-                  body: 'Complete your WappPay registration in a few quick steps.',
-                  header: 'Create Your Account',
+                  body: 'Complete your WappPay registration in the form below.',
+                  header: 'Join WappPay',
                   footer: 'from WappPay',
-                  startScreen: 'PERSONAL_INFO',
+                  startScreen: 'WAPPPAY_SIGNUP',
                   initialData: {
                     full_name: contactName || '',
                     country: 'NG',
@@ -364,19 +437,7 @@ export class AIAssistantService {
             customer.id,
             limit,
           );
-
-          if (transactions.length === 0) {
-            reply = '📄 You have no recorded simulated transactions yet.';
-          } else {
-            const lines = transactions.map((t, idx) => {
-              const sign = t.type === 'DEPOSIT' ? '+' : '-';
-              return (
-                `${idx + 1}. *${t.type}*: ${sign}${formatKoboToNaira(t.amountKobo)} ` +
-                `(${t.state}) - \`${t.reference}\``
-              );
-            });
-            reply = `📊 *Recent Simulated Transactions (Last ${transactions.length}):*\n\n${lines.join('\n')}\n\n_All transactions simulated for testing._`;
-          }
+          reply = this.formatTransactionHistory(transactions);
           break;
         }
 
@@ -574,7 +635,8 @@ export class AIAssistantService {
           if (recipients.length === 0) {
             reply =
               `👥 You have no saved recipients yet.\n\n` +
-              `You can transfer to any mock contact by typing:\n` +
+              `➕ Add your first: _"add contact Mum 0123456789 GTB"_\n` +
+              `Or transfer to any mock contact by typing:\n` +
               `_"Send ₦5,000 to Mum"_`;
           } else {
             const list = recipients.map(
@@ -582,8 +644,115 @@ export class AIAssistantService {
                 `• *${r.accountName}* (${r.bankName})\n` +
                 `  Account: \`${r.accountNumber}\` | Aliases: ${r.aliases.join(', ') || 'None'}`,
             );
-            reply = `👥 *Your Saved Recipients:*\n\n${list.join('\n\n')}`;
+            reply =
+              `👥 *Your Saved Contacts:*\n\n${list.join('\n\n')}\n\n` +
+              `➕ *Add:* _"add contact Chidi 0123456789 GTB"_\n` +
+              `✏️ *Edit:* _"rename mum to mother"_ or _"edit contact mum"_\n` +
+              `🗑️ *Delete:* _"delete contact mum"_`;
           }
+          break;
+        }
+
+        // --- J2. Edit Contact / Recipient ---
+        case MockFinancialIntent.EDIT_CONTACT: {
+          this.pendingEditContactSessions.delete(customer.id);
+
+          if (!parsed.recipient) {
+            // No target yet — ask who to edit and show the contact list.
+            const recipients = await this.mockFinancialService.listSavedRecipients(customer.id);
+            const list = recipients.map(
+              (r) =>
+                `• *${r.accountName}* (${r.bankName})` +
+                (r.aliases.length ? ` — alias: ${r.aliases.join(', ')}` : ''),
+            );
+            this.pendingEditContactSessions.set(customer.id, {
+              stage: 'SELECT_TARGET',
+            });
+            reply =
+              `✏️ *Edit a Contact\n\n` +
+              `Who would you like to edit?\n\n` +
+              (list.length
+                ? `${list.join('\n')}\n\n`
+                : `_You have no saved contacts yet._\n\n`) +
+              `Reply with the contact's name or alias, e.g. _mum_\n` +
+              `Or reply *cancel* to stop.`;
+            break;
+          }
+
+          if (!parsed.newValue) {
+            // Target known, but not what to change yet.
+            this.pendingEditContactSessions.set(customer.id, {
+              stage: 'SELECT_FIELD',
+              target: parsed.recipient,
+            });
+            reply =
+              `✏️ *Editing contact:* *${parsed.recipient}*\n\n` +
+              `What would you like to change? Reply with:\n` +
+              `• _alias newname_ — change their nickname\n` +
+              `• _name Full Name_ — change their account name\n` +
+              `• _account number 0123456789_ — change their account number\n\n` +
+              `Or reply *cancel* to stop.`;
+            break;
+          }
+
+          reply = await this.executeContactEdit(
+            customer.id,
+            parsed.recipient,
+            parsed.editField || 'alias',
+            parsed.newValue,
+          );
+          break;
+        }
+
+        // --- J3. Add Contact / Recipient ---
+        case MockFinancialIntent.ADD_CONTACT: {
+          this.pendingAddContactSessions.delete(customer.id);
+
+          if (!parsed.contactName) {
+            this.pendingAddContactSessions.set(customer.id, { stage: 'SELECT_NAME' });
+            reply = withBrand(
+              `➕ *Add a Contact*\n\n` +
+                `What name should I save them under?\n` +
+                `e.g. _Chidi_\n\n` +
+                `Or reply *cancel* to stop.`,
+            );
+            break;
+          }
+
+          reply = await this.startOrCompleteAddContact(customer.id, {
+            contactName: parsed.contactName,
+            accountNumber: parsed.accountNumber,
+            bankName: parsed.bankName,
+            alias: parsed.recipient || parsed.newValue,
+          });
+          break;
+        }
+
+        // --- J4. Delete Contact / Recipient ---
+        case MockFinancialIntent.DELETE_CONTACT: {
+          this.pendingDeleteContactSessions.delete(customer.id);
+
+          if (!parsed.recipient) {
+            const recipients = await this.mockFinancialService.listSavedRecipients(customer.id);
+            const list = recipients.map(
+              (r) =>
+                `• *${r.accountName}* (${r.bankName})` +
+                (r.aliases.length ? ` — alias: ${r.aliases.join(', ')}` : ''),
+            );
+            this.pendingDeleteContactSessions.set(customer.id, { stage: 'SELECT_TARGET' });
+            reply = withBrand(
+              `🗑️ *Delete a Contact*\n\n` +
+                `Who would you like to remove?\n\n` +
+                (list.length
+                  ? `${list.join('\n')}\n\n`
+                  : `_You have no saved contacts yet._\n\n`) +
+                `Reply with the contact's name or alias, e.g. _mum_\n` +
+                `Or reply *cancel* to stop.`,
+            );
+            break;
+          }
+
+          reply = await this.startDeleteContact(customer.id, parsed.recipient);
           break;
         }
 
@@ -729,41 +898,463 @@ export class AIAssistantService {
   }
 
   private async handleTransactionHistory(customer: any, normalizedPhone: string): Promise<string> {
-    if (!this.walletService) {
-      return withBrand('Transaction history is temporarily unavailable.');
+    try {
+      const transactions = await this.mockFinancialService.getTransactionHistory(customer.id, 10);
+      return this.formatTransactionHistory(transactions);
+    } catch (err: any) {
+      return withBrand(`Could not load history: ${err.message}`);
+    }
+  }
+
+  /**
+   * Formats a customer's transaction rows into the shared WhatsApp history reply.
+   */
+  private formatTransactionHistory(transactions: MockTransactionSummary[]): string {
+    if (transactions.length === 0) {
+      return (
+        '📄 You have no recorded transactions yet.\n\n' +
+        'Say *deposit ₦5,000* to add test funds to your account!'
+      );
+    }
+
+    const lines = transactions.map((t, idx) => {
+      const date = new Date(t.createdAt).toLocaleDateString('en-NG', {
+        month: 'short',
+        day: 'numeric',
+      });
+      const sign = t.type === 'DEPOSIT' ? '+' : '-';
+      const who = t.recipientName ? ` → ${t.recipientName}` : '';
+      return (
+        `${idx + 1}. *${t.type}*: ${sign}${formatKoboToNaira(t.amountKobo)}${who} (${t.state})\n` +
+        `   ${date} • \`${t.reference}\``
+      );
+    });
+
+    return (
+      `📊 *Recent Transactions (Last ${transactions.length}):*\n\n` +
+      `${lines.join('\n\n')}\n\n` +
+      `_All transactions simulated for testing._`
+    );
+  }
+
+  /**
+   * Continues a multi-step contact edit (target selection → field/value entry).
+   */
+  private async continueEditContactSession(
+    customer: any,
+    message: string,
+    session: { stage: 'SELECT_TARGET' | 'SELECT_FIELD'; target?: string },
+  ): Promise<string> {
+    if (session.stage === 'SELECT_TARGET') {
+      session.target = message.trim();
+      session.stage = 'SELECT_FIELD';
+      this.pendingEditContactSessions.set(customer.id, session);
+      return withBrand(
+        `✏️ *Editing contact:* *${session.target}*\n\n` +
+          `What would you like to change? Reply with:\n` +
+          `• _alias newname_ — change their nickname\n` +
+          `• _name Full Name_ — change their account name\n` +
+          `• _account number 0123456789_ — change their account number\n\n` +
+          `Or reply *cancel* to stop.`,
+      );
+    }
+
+    // SELECT_FIELD: parse "<field> <value>" — bare input defaults to an alias rename.
+    const trimmed = message.trim();
+    const match = trimmed.match(
+      /^(alias|name|account\s*(?:number|no))\s*(?:to\s+)?(.+)$/i,
+    );
+    const field: 'alias' | 'name' | 'accountNumber' = match
+      ? /^account/i.test(match[1])
+        ? 'accountNumber'
+        : /^name/i.test(match[1])
+          ? 'name'
+          : 'alias'
+      : 'alias';
+    const value = match ? match[2].trim() : trimmed;
+
+    this.pendingEditContactSessions.delete(customer.id);
+    return await this.executeContactEdit(customer.id, session.target!, field, value);
+  }
+
+  /**
+   * Applies a contact edit via RecipientsService and formats the result/errors.
+   */
+  private async executeContactEdit(
+    customerId: string,
+    target: string,
+    field: 'alias' | 'name' | 'accountNumber',
+    value: string,
+  ): Promise<string> {
+    if (!this.recipientsService) {
+      return '✏️ Contact editing is temporarily unavailable. Please try again later.';
     }
 
     try {
-      const { transactions, total } = await this.walletService.getTransactions(
-        customer.id,
-        1,
-        10,
-      );
-
-      if (transactions.length === 0) {
-        return withBrand(
-          `📄 No transactions yet.\n\n` +
-          `Say *deposit* to add test funds to your wallet!`,
-        );
-      }
-
-      const lines = transactions.map((t, idx) => {
-        const date = t.createdAt.toLocaleDateString('en-NG', {
-          month: 'short',
-          day: 'numeric',
-        });
-        const amount = formatNaira(t.amountKobo);
-        const sign = t.type === 'DEPOSIT' ? '+' : '-';
-        return `${idx + 1}. ${t.type} ${sign}${amount} (${t.status})\n   ${date} • \`${t.reference}\``;
+      const result = await this.recipientsService.updateRecipient({
+        customerId,
+        aliasOrName: target,
+        field,
+        value,
       });
 
-      return withBrand(
-        `📊 Recent Transactions (showing ${transactions.length} of ${total}):\n\n` +
-        `${lines.join('\n\n')}\n\n` +
-        `_All transactions are TEST DATA._`,
+      const labels: Record<typeof field, string> = {
+        alias: 'Alias',
+        name: 'Account name',
+        accountNumber: 'Account number',
+      };
+      const change =
+        result.previousValue && result.previousValue !== result.newValue
+          ? `${labels[field]}: *${result.previousValue}* → *${result.newValue}*\n`
+          : `${labels[field]}: *${result.newValue}*\n`;
+
+      return (
+        `✅ *Contact Updated*\n\n` +
+        `• *Name:* ${result.recipient.accountName}\n` +
+        `• *Account:* \`${result.recipient.accountNumber}\` (${result.recipient.bankName})\n` +
+        `• ${change}\n` +
+        `Type *contacts* to see your full list.`
       );
     } catch (err: any) {
-      return withBrand(`Could not load history: ${err.message}`);
+      const body: any =
+        typeof err.getResponse === 'function' ? err.getResponse() : null;
+      const code = body?.code || '';
+
+      if (code === ERROR_CODES.RECIPIENT_NOT_FOUND) {
+        return await this.buildContactNotFoundReply(customerId, target);
+      }
+
+      if (code === ERROR_CODES.RECIPIENT_AMBIGUOUS) {
+        return this.buildContactAmbiguousReply(target, body?.details?.matches || []);
+      }
+
+      return `✏️ *Contact update failed*\n\n${err.message || 'Unknown error.'}`;
+    }
+  }
+
+  /**
+   * Shared "no matching contact" reply: shows the customer's contact list.
+   */
+  private async buildContactNotFoundReply(customerId: string, target: string): Promise<string> {
+    const recipients = await this.mockFinancialService
+      .listSavedRecipients(customerId)
+      .catch(() => []);
+    const list = recipients.map(
+      (r) =>
+        `• *${r.accountName}*` +
+        (r.aliases.length ? ` (alias: ${r.aliases.join(', ')})` : ''),
+    );
+    return (
+      `😕 I couldn't find a contact matching *"${target}"*.\n\n` +
+      (list.length
+        ? `*Your contacts:*\n${list.join('\n')}\n\n`
+        : '') +
+      `Try again with a name or alias from the list.`
+    );
+  }
+
+  /**
+   * Shared "matches multiple contacts" reply.
+   */
+  private buildContactAmbiguousReply(
+    target: string,
+    matches: Array<{ name: string; bank: string }>,
+  ): string {
+    const list = matches.map((m) => `• *${m.name}* (${m.bank})`);
+    return (
+      `🤔 *"${target}" matches multiple contacts:*\n\n${list.join('\n')}\n\n` +
+      `Please use a more specific name or alias.`
+    );
+  }
+
+  /**
+   * Routes an add-contact draft to the next wizard step, or saves it when
+   * every required field (name, 10-digit account, bank) is present.
+   */
+  private async startOrCompleteAddContact(
+    customerId: string,
+    draft: {
+      contactName?: string;
+      accountNumber?: string;
+      bankName?: string;
+      alias?: string;
+    },
+  ): Promise<string> {
+    if (!draft.accountNumber) {
+      this.pendingAddContactSessions.set(customerId, {
+        stage: 'SELECT_ACCOUNT',
+        ...draft,
+      });
+      return withBrand(
+        `➕ *Adding contact:* *${draft.contactName}*\n\n` +
+          `What is their 10-digit account number?\n` +
+          `e.g. _0123456789_\n\n` +
+          `Or reply *cancel* to stop.`,
+      );
+    }
+
+    if (!/^\d{10}$/.test(draft.accountNumber)) {
+      this.pendingAddContactSessions.set(customerId, {
+        stage: 'SELECT_ACCOUNT',
+        ...draft,
+        accountNumber: undefined,
+      });
+      return withBrand(
+        `⚠️ That doesn't look like a valid account number — it must be exactly *10 digits*.\n\n` +
+          `Please send the account number for *${draft.contactName}*.\n\n` +
+          `Or reply *cancel* to stop.`,
+      );
+    }
+
+    if (!draft.bankName) {
+      this.pendingAddContactSessions.set(customerId, {
+        stage: 'SELECT_BANK',
+        ...draft,
+      });
+      return withBrand(
+        `➕ *Adding contact:* *${draft.contactName}* (\`${draft.accountNumber}\`)\n\n` +
+          `Which bank do they use?\n` +
+          `e.g. _GTB_, _Access Bank_, _Zenith Bank_\n\n` +
+          `Or reply *cancel* to stop.`,
+      );
+    }
+
+    return this.executeAddContact(customerId, draft);
+  }
+
+  /**
+   * Continues the multi-step add-contact wizard.
+   */
+  private async continueAddContactSession(
+    customer: any,
+    message: string,
+    session: {
+      stage: 'SELECT_NAME' | 'SELECT_ACCOUNT' | 'SELECT_BANK';
+      contactName?: string;
+      accountNumber?: string;
+      bankName?: string;
+      alias?: string;
+    },
+  ): Promise<string> {
+    const text = message.trim();
+
+    if (session.stage === 'SELECT_NAME') {
+      if (!text) {
+        return withBrand(
+          `➕ Please send a *name* for the contact, e.g. _Chidi_\n\nOr reply *cancel* to stop.`,
+        );
+      }
+      session.contactName = text;
+      session.stage = 'SELECT_ACCOUNT';
+      this.pendingAddContactSessions.set(customer.id, session);
+      return withBrand(
+        `➕ *Adding contact:* *${session.contactName}*\n\n` +
+          `What is their 10-digit account number?\n` +
+          `e.g. _0123456789_\n\n` +
+          `Or reply *cancel* to stop.`,
+      );
+    }
+
+    if (session.stage === 'SELECT_ACCOUNT') {
+      const match = text.match(/\b(\d{10})\b/);
+      if (!match) {
+        return withBrand(
+          `⚠️ Please send a *10-digit* account number (digits only), e.g. _0123456789_.\n\n` +
+            `Or reply *cancel* to stop.`,
+        );
+      }
+      session.accountNumber = match[1];
+      session.stage = 'SELECT_BANK';
+      this.pendingAddContactSessions.set(customer.id, session);
+      return withBrand(
+        `➕ *Adding contact:* *${session.contactName}* (\`${session.accountNumber}\`)\n\n` +
+          `Which bank do they use?\n` +
+          `e.g. _GTB_, _Access Bank_, _Zenith Bank_\n\n` +
+          `Or reply *cancel* to stop.`,
+      );
+    }
+
+    // SELECT_BANK — final step.
+    if (!text) {
+      return withBrand(
+        `➕ Please send the *bank name*, e.g. _GTB_\n\nOr reply *cancel* to stop.`,
+      );
+    }
+    session.bankName = text;
+    this.pendingAddContactSessions.delete(customer.id);
+    return this.executeAddContact(customer.id, session);
+  }
+
+  /**
+   * Persists a new contact via RecipientsService and formats the receipt.
+   */
+  private async executeAddContact(
+    customerId: string,
+    draft: {
+      contactName?: string;
+      accountNumber?: string;
+      bankName?: string;
+      alias?: string;
+    },
+  ): Promise<string> {
+    if (!this.recipientsService) {
+      return '➕ Contact saving is temporarily unavailable. Please try again later.';
+    }
+
+    const accountName = (draft.contactName || '').trim();
+    const accountNumber = (draft.accountNumber || '').trim();
+    const bankName = (draft.bankName || '').trim();
+
+    if (!accountName || !/^\d{10}$/.test(accountNumber) || !bankName) {
+      return '➕ *Contact not saved*\n\nA name, a 10-digit account number and a bank are required.';
+    }
+
+    try {
+      const alias = (draft.alias || accountName).trim().toLowerCase();
+      await this.recipientsService.saveRecipient({
+        customerId,
+        accountName,
+        accountNumber,
+        bankCode: this.resolveBankCode(bankName),
+        bankName,
+        alias,
+      });
+
+      return (
+        `✅ *Contact Saved*\n\n` +
+        `• *Name:* ${accountName}\n` +
+        `• *Account:* \`${accountNumber}\` (${bankName})\n` +
+        `• *Alias:* ${alias}\n\n` +
+        `You can now send money with _"Send ₦1,000 to ${alias}"_\n` +
+        `Type *contacts* to see your full list.`
+      );
+    } catch (err: any) {
+      return `➕ *Contact not saved*\n\n${err.message || 'Unknown error.'}`;
+    }
+  }
+
+  /**
+   * Resolves a chat-provided bank name to a bank code. Unknown banks fall
+   * back to a normalized slug — no real bank codes are invented.
+   */
+  private resolveBankCode(bankName: string): string {
+    const known: Record<string, string> = {
+      gtb: '058',
+      gtbank: '058',
+      'guaranty trust bank': '058',
+      'guaranty trust': '058',
+      access: '044',
+      'access bank': '044',
+      'first bank': '011',
+      firstbank: '011',
+      'first bank of nigeria': '011',
+      zenith: '057',
+      'zenith bank': '057',
+      uba: '033',
+      'united bank for africa': '033',
+      palmpay: '999',
+      opay: '999',
+      kuda: '999',
+      'wappay mock bank': '999',
+    };
+    const key = bankName.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (known[key]) return known[key];
+    return key.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'unknown';
+  }
+
+  /**
+   * Starts the delete-contact flow: resolves the target and asks for
+   * confirmation before anything is removed.
+   */
+  private async startDeleteContact(customerId: string, target: string): Promise<string> {
+    if (!this.recipientsService) {
+      return '🗑️ Contact deletion is temporarily unavailable. Please try again later.';
+    }
+
+    try {
+      const recipient = await this.recipientsService.resolveRecipient(customerId, target);
+      this.pendingDeleteContactSessions.set(customerId, { stage: 'CONFIRM', target });
+      return withBrand(
+        `🗑️ *Confirm deletion*\n\n` +
+          `• *Name:* ${recipient.accountName}\n` +
+          `• *Account:* \`${recipient.accountNumber}\` (${recipient.bankName})\n\n` +
+          `Reply *yes* to delete this contact, or *no* to keep it.`,
+      );
+    } catch (err: any) {
+      const body: any = typeof err.getResponse === 'function' ? err.getResponse() : null;
+      const code = body?.code || '';
+      if (code === ERROR_CODES.RECIPIENT_NOT_FOUND) {
+        return await this.buildContactNotFoundReply(customerId, target);
+      }
+      if (code === ERROR_CODES.RECIPIENT_AMBIGUOUS) {
+        return this.buildContactAmbiguousReply(target, body?.details?.matches || []);
+      }
+      return `🗑️ *Contact not deleted*\n\n${err.message || 'Unknown error.'}`;
+    }
+  }
+
+  /**
+   * Continues the delete-contact flow (target selection → confirmation).
+   */
+  private async continueDeleteContactSession(
+    customer: any,
+    message: string,
+    session: { stage: 'SELECT_TARGET' | 'CONFIRM'; target?: string },
+  ): Promise<string> {
+    if (session.stage === 'SELECT_TARGET') {
+      session.target = message.trim();
+      if (!session.target) {
+        return withBrand(
+          `🗑️ Please send a *name or alias* of the contact to delete.\n\nOr reply *cancel* to stop.`,
+        );
+      }
+      session.stage = 'CONFIRM';
+      this.pendingDeleteContactSessions.set(customer.id, session);
+      return await this.startDeleteContact(customer.id, session.target);
+    }
+
+    // CONFIRM stage — "no"/"cancel" words are intercepted above, so a
+    // non-yes answer here also aborts.
+    const text = message.trim().toLowerCase();
+    if (!/^(?:yes|y|confirm|proceed|sure|delete|ok)$/.test(text)) {
+      this.pendingDeleteContactSessions.delete(customer.id);
+      return withBrand('🗑️ *Contact not deleted.*\n\nWhat else would you like to do?');
+    }
+
+    if (!this.recipientsService) {
+      this.pendingDeleteContactSessions.delete(customer.id);
+      return '🗑️ Contact deletion is temporarily unavailable. Please try again later.';
+    }
+
+    try {
+      const removed = await this.recipientsService.deleteRecipient(
+        customer.id,
+        session.target!,
+      );
+      this.pendingDeleteContactSessions.delete(customer.id);
+      const aliasLine = removed.aliases.length
+        ? `\n• *Aliases:* ${removed.aliases.join(', ')}`
+        : '';
+      return withBrand(
+        `🗑️ *Contact Deleted*\n\n` +
+          `• *Name:* ${removed.accountName}\n` +
+          `• *Account:* \`${removed.accountNumber}\` (${removed.bankName})${aliasLine}\n\n` +
+          `Type *contacts* to see your remaining list.`,
+      );
+    } catch (err: any) {
+      this.pendingDeleteContactSessions.delete(customer.id);
+      const body: any = typeof err.getResponse === 'function' ? err.getResponse() : null;
+      const code = body?.code || '';
+      if (code === ERROR_CODES.RECIPIENT_NOT_FOUND) {
+        return await this.buildContactNotFoundReply(customer.id, session.target!);
+      }
+      if (code === ERROR_CODES.RECIPIENT_AMBIGUOUS) {
+        return this.buildContactAmbiguousReply(
+          session.target!,
+          body?.details?.matches || [],
+        );
+      }
+      return `🗑️ *Contact not deleted*\n\n${err.message || 'Unknown error.'}`;
     }
   }
 

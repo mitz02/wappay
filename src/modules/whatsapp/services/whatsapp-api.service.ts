@@ -211,6 +211,73 @@ export class WhatsAppApiService {
   }
 
   /**
+   * Dispatches a WhatsApp Flow interactive message (in-chat form with
+   * TextInput / Dropdown / OptIn components defined in Flow JSON).
+   */
+  async sendInteractiveFlow(options: {
+    to: string;
+    flowId: string;
+    flowToken: string;
+    cta: string;
+    body: string;
+    header?: string;
+    footer?: string;
+    startScreen?: string;
+    initialData?: Record<string, any>;
+    replyToMessageId?: string;
+  }): Promise<WhatsAppApiResponse> {
+    const cleanTo = options.to.replace(/[^0-9]/g, '');
+    const mode =
+      process.env.WHATSAPP_FLOW_MODE === 'draft' ? 'draft' : 'published';
+
+    const parameters: Record<string, any> = {
+      flow_message_version: '3',
+      flow_action: 'navigate',
+      flow_token: options.flowToken,
+      flow_id: options.flowId,
+      flow_cta: options.cta.slice(0, 20),
+      mode,
+    };
+
+    if (options.startScreen) {
+      parameters.flow_action_payload = {
+        screen: options.startScreen,
+        data: options.initialData || {},
+      };
+    }
+
+    const payload: any = {
+      messaging_product: WHATSAPP_CONFIG.MESSAGING_PRODUCT,
+      recipient_type: WHATSAPP_CONFIG.RECIPIENT_TYPE_INDIVIDUAL,
+      to: cleanTo,
+      type: 'interactive',
+      interactive: {
+        type: 'flow',
+        body: { text: options.body },
+        action: {
+          name: 'flow',
+          parameters,
+        },
+      },
+    };
+
+    if (options.header) {
+      payload.interactive.header = {
+        type: 'text',
+        text: options.header.slice(0, 60),
+      };
+    }
+    if (options.footer) {
+      payload.interactive.footer = { text: options.footer.slice(0, 60) };
+    }
+    if (options.replyToMessageId) {
+      payload.context = { message_id: options.replyToMessageId };
+    }
+
+    return await this.dispatchPayload(cleanTo, payload);
+  }
+
+  /**
    * Internal helper to dispatch any prepared payload to Meta Cloud API.
    */
   private async dispatchPayload(cleanTo: string, payload: any): Promise<WhatsAppApiResponse> {

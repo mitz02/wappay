@@ -2,6 +2,8 @@ import { AIAssistantService } from './services/ai-assistant.service';
 import { ConversationHistoryService } from './services/conversation-history.service';
 import { IntentParserService } from './services/intent-parser.service';
 import { MockFinancialService } from '../mock-financial/services/mock-financial.service';
+import { RecipientsService } from '../recipients/recipients.service';
+import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { IChatProvider, ChatMessage } from '../../contracts/ai/ai-provider.contract';
 
 describe('AIAssistantService', () => {
@@ -194,7 +196,7 @@ describe('AIAssistantService', () => {
     const reply = await service.processCustomerMessage('2348012345678', 'Show my transaction history');
 
     expect(mockFinancialService.getTransactionHistory).toHaveBeenCalledWith('cust-123', 5);
-    expect(reply).toContain('Recent Simulated Transactions');
+    expect(reply).toContain('Recent Transactions');
     expect(reply).toContain('TRANSFER');
     expect(reply).toContain('TXN_001');
   });
@@ -430,7 +432,7 @@ describe('AIAssistantService', () => {
     const reply = await service.processCustomerMessage('2348012345678', 'Who are my saved recipients?');
 
     expect(mockFinancialService.listSavedRecipients).toHaveBeenCalledWith('cust-123');
-    expect(reply).toContain('Your Saved Recipients:');
+    expect(reply).toContain('Your Saved Contacts:');
     expect(reply).toContain('Jane Adeleke');
     expect(reply).toContain('mum');
   });
@@ -445,5 +447,137 @@ describe('AIAssistantService', () => {
     expect(mockChatProvider.generateChatResponse).toHaveBeenCalledTimes(1);
     expect(reply).toContain('Hello Adebayo! How can I help you today?');
     expect(reply).toContain('from WappPay');
+  });
+
+  // -------------------------------------------------------------------------
+  // 11. Contact List Management — add / view / delete (end-to-end chat flow)
+  // -------------------------------------------------------------------------
+
+  describe('contact list management', () => {
+    const phone = '2348012345678';
+    let prisma: PrismaService;
+    let recipientsService: RecipientsService;
+
+    beforeEach(() => {
+      process.env.DATABASE_MODE = 'mock';
+      prisma = new PrismaService();
+      recipientsService = new RecipientsService(prisma);
+
+      // Back the list view with the real contact book so the whole flow
+      // (add → list → delete) runs against actual persistence.
+      mockFinancialService.listSavedRecipients = jest.fn(async (customerId: string) => {
+        const rows = await recipientsService.getCustomerRecipients(customerId);
+        return rows.map((r: any) => ({
+          id: r.id,
+          accountName: r.accountName,
+          accountNumber: r.accountNumber,
+          bankName: r.bankName,
+          bankCode: r.bankCode,
+          aliases: (r.aliases || []).map((a: any) => a.alias),
+        }));
+      });
+
+      service = new AIAssistantService(
+        mockChatProvider,
+        historyService,
+        intentParser,
+        mockFinancialService,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        recipientsService,
+      );
+    });
+
+    afterEach(async () => {
+      await prisma.onModuleDestroy();
+    });
+
+    it('adds a contact with a one-line chat command', async () => {
+      const reply = await service.processCustomerMessage(
+        phone,
+        'add contact Chidi 0777888999 Access Bank',
+      );
+
+      expect(reply).toContain('Contact Saved');
+      expect(reply).toContain('Chidi');
+      expect(reply).toContain('0777888999');
+
+      const saved = await recipientsService.resolveRecipient('cust-123', 'chidi');
+      expect(saved.accountNumber).toBe('0777888999');
+      expect(saved.bankName).toBe('Access Bank');
+    });
+
+    it('completes a partial add through the multi-step wizard', async () => {
+      const first = await service.processCustomerMessage(phone, 'add contact Emeka');
+      expect(first).toContain('account number');
+
+      const second = await service.processCustomerMessage(phone, '0999888777');
+      expect(second).toContain('bank');
+
+      const third = await service.processCustomerMessage(phone, 'GTB');
+      expect(third).toContain('Contact Saved');
+
+      const saved = await recipientsService.resolveRecipient('cust-123', 'emeka');
+      expect(saved.accountNumber).toBe('0999888777');
+      expect(saved.bankName).toBe('GTB');
+    });
+
+    it('lists contacts after adding one', async () => {
+      await service.processCustomerMessage(phone, 'add contact Chidi 0777888999 Access Bank');
+
+      const reply = await service.processCustomerMessage(phone, 'contacts');
+      expect(reply).toContain('Your Saved Contacts:');
+      expect(reply).toContain('Chidi');
+      expect(reply).toContain('delete contact');
+    });
+
+    it('asks for confirmation before deleting, then deletes on "yes"', async () => {
+      await service.processCustomerMessage(phone, 'add contact Chidi 0777888999 Access Bank');
+
+      const prompt = await service.processCustomerMessage(phone, 'delete contact chidi');
+      expect(prompt).toContain('Confirm deletion');
+      expect(prompt).toContain('0777888999');
+      expect(prompt).toContain('yes');
+
+      // Still present before confirmation.
+      await expect(
+        recipientsService.resolveRecipient('cust-123', 'chidi'),
+      ).resolves.toBeDefined();
+
+      const done = await service.processCustomerMessage(phone, 'yes');
+      expect(done).toContain('Contact Deleted');
+
+      await expect(
+        recipientsService.resolveRecipient('cust-123', 'chidi'),
+      ).rejects.toThrow();
+    });
+
+    it('cancels a deletion when the customer replies "no"', async () => {
+      await service.processCustomerMessage(phone, 'add contact Chidi 0777888999 Access Bank');
+      await service.processCustomerMessage(phone, 'delete contact chidi');
+
+      const reply = await service.processCustomerMessage(phone, 'no');
+      expect(reply).toContain('not deleted');
+
+      await expect(
+        recipientsService.resolveRecipient('cust-123', 'chidi'),
+      ).resolves.toBeDefined();
+    });
+
+    it('shows the contact list when deleting without a target', async () => {
+      await service.processCustomerMessage(phone, 'add contact Chidi 0777888999 Access Bank');
+
+      const reply = await service.processCustomerMessage(phone, 'delete contact');
+      expect(reply).toContain('Who would you like to remove?');
+      expect(reply).toContain('Chidi');
+    });
+
+    it('reports an unknown contact without deleting anything', async () => {
+      const reply = await service.processCustomerMessage(phone, 'delete contact ghost');
+      expect(reply).toContain('couldn\'t find a contact');
+    });
   });
 });

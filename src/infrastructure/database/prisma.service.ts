@@ -8,12 +8,10 @@ import { MockDatabaseStore } from './mock-database.store';
  * Provides database access for the WAPPay application.
  *
  * Architecture & Pluggability:
- * - When PostgreSQL is available and DATABASE_MODE !== 'mock', connects directly to PostgreSQL.
- * - When no PostgreSQL instance is running or DATABASE_MODE=mock, automatically engages
- *   an in-memory mock database store pre-seeded with chart of accounts, mock customers,
- *   recipients, and transaction history.
- * - Can be seamlessly swapped back to PostgreSQL at any time simply by changing DATABASE_MODE
- *   in .env or starting the PostgreSQL service, with zero application code changes required.
+ * - When DATABASE_MODE=mock, uses the in-memory mock database store (tests/dev).
+ * - When DATABASE_MODE=postgres, connects directly to PostgreSQL with retries and
+ *   fails loudly if the database is unreachable — it never silently falls back to
+ *   mock, so writes cannot be lost without notice.
  */
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
@@ -41,16 +39,32 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       return;
     }
 
-    try {
-      await this.$connect();
-      this.logger.log('Successfully connected to PostgreSQL database');
-    } catch (error: any) {
-      this.logger.warn(
-        `PostgreSQL unreachable at ${process.env.DATABASE_URL || 'localhost:5432'} (${error.message}). ` +
-          'Engaging in-memory mock database fallback.',
-      );
-      this.enableMockMode();
+    // DATABASE_MODE=postgres means the user explicitly asked for real persistence.
+    // Retry transient network blips, then fail loudly — never silently swap in the
+    // mock store, which would swallow writes without anyone noticing.
+    const maxAttempts = 3;
+    let lastError: any;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await this.$connect();
+        this.logger.log('Successfully connected to PostgreSQL database');
+        return;
+      } catch (error: any) {
+        lastError = error;
+        this.logger.warn(
+          `PostgreSQL connect attempt ${attempt}/${maxAttempts} failed: ${error.message}`,
+        );
+        if (attempt < maxAttempts) {
+          await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+        }
+      }
     }
+
+    this.logger.error(
+      `PostgreSQL unreachable after ${maxAttempts} attempts. ` +
+        'Refusing to fall back to the in-memory mock store while DATABASE_MODE=postgres.',
+    );
+    throw lastError;
   }
 
   async onModuleDestroy() {

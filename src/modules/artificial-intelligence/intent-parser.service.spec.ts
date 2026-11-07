@@ -105,6 +105,78 @@ describe('IntentParserService', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // 3b. Cross-border (Africa / China) & vendor payments
+  // ---------------------------------------------------------------------------
+
+  describe('CROSS_BORDER_PAYMENT intent', () => {
+    it('detects "Pay Cameroon supplier ₦100,000" as AFRICA cross-border', async () => {
+      const result = await service.parseIntent('Pay Cameroon supplier ₦100,000');
+      expect(result.intent).toBe(MockFinancialIntent.CROSS_BORDER_PAYMENT);
+      expect(result.destinationType).toBe('AFRICA');
+      expect(result.destinationCountry).toBe('Cameroon');
+      expect(result.amountKobo).toBe(10_000_000n); // ₦100,000
+    });
+
+    it('detects "pay china supplier ₦500,000" as CHINA cross-border', async () => {
+      const result = await service.parseIntent('pay china supplier ₦500,000');
+      expect(result.intent).toBe(MockFinancialIntent.CROSS_BORDER_PAYMENT);
+      expect(result.destinationType).toBe('CHINA');
+      expect(result.destinationCountry).toBe('China');
+      expect(result.amountKobo).toBe(50_000_000n); // ₦500,000
+    });
+
+    it('routes "Send ₦5,000 to Ghana" to cross-border instead of domestic TRANSFER', async () => {
+      const result = await service.parseIntent('Send ₦5,000 to Ghana');
+      expect(result.intent).toBe(MockFinancialIntent.CROSS_BORDER_PAYMENT);
+      expect(result.destinationCountry).toBe('Ghana');
+      expect(result.amountKobo).toBe(500_000n);
+    });
+
+    it('returns CROSS_BORDER_PAYMENT without amount for bare "Pay Cameroon supplier"', async () => {
+      const result = await service.parseIntent('Pay Cameroon supplier');
+      expect(result.intent).toBe(MockFinancialIntent.CROSS_BORDER_PAYMENT);
+      expect(result.destinationType).toBe('AFRICA');
+      expect(result.destinationCountry).toBe('Cameroon');
+      expect(result.amountKobo).toBeUndefined();
+    });
+
+    it('keeps domestic "Send ₦5,000 to Mum" as TRANSFER', async () => {
+      const result = await service.parseIntent('Send ₦5,000 to Mum');
+      expect(result.intent).toBe(MockFinancialIntent.TRANSFER);
+      expect(result.amountKobo).toBe(500_000n);
+      expect(result.recipient).toBe('Mum');
+    });
+
+    it('does not fire on messages without a payment verb', async () => {
+      const result = await service.parseIntent('what is the rate for Ghana');
+      expect(result.intent).not.toBe(MockFinancialIntent.CROSS_BORDER_PAYMENT);
+    });
+  });
+
+  describe('VENDOR_PAYMENT intent', () => {
+    it('detects "Pay vendor Acme Stores ₦20,000" with payee name', async () => {
+      const result = await service.parseIntent('Pay vendor Acme Stores ₦20,000');
+      expect(result.intent).toBe(MockFinancialIntent.VENDOR_PAYMENT);
+      expect(result.destinationType).toBe('VENDOR');
+      expect(result.amountKobo).toBe(2_000_000n); // ₦20,000
+      expect(result.recipient).toBe('Acme Stores');
+    });
+
+    it('detects "send ₦15,000 to supplier John" as VENDOR payment', async () => {
+      const result = await service.parseIntent('send ₦15,000 to supplier John');
+      expect(result.intent).toBe(MockFinancialIntent.VENDOR_PAYMENT);
+      expect(result.amountKobo).toBe(1_500_000n); // ₦15,000
+      expect(result.recipient).toBe('John');
+    });
+
+    it('returns VENDOR_PAYMENT without amount for "pay my supplier"', async () => {
+      const result = await service.parseIntent('pay my supplier');
+      expect(result.intent).toBe(MockFinancialIntent.VENDOR_PAYMENT);
+      expect(result.amountKobo).toBeUndefined();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // 4. Deposit
   // ---------------------------------------------------------------------------
 

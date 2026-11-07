@@ -260,6 +260,125 @@ describe('[Integration] Financial Simulations', () => {
     expect(balance.availableBalanceKobo).toBeLessThan(25_000_000n);
   });
 
+  // --- 3a-bis. Cross-border (Africa / China) & vendor payments ---
+
+  it('creates a Cameroon cross-border preview with simulated XAF conversion', async () => {
+    const { assistant } = buildServiceGraph();
+
+    const reply = await assistant.processCustomerMessage(
+      '2348012345678',
+      'Pay Cameroon supplier ₦100,000',
+    );
+
+    expect(reply).toContain('Cross-Border Payment Preview');
+    expect(reply).toContain('Cameroon');
+    expect(reply).toContain('🇨🇲');
+    expect(reply).toContain('₦100,000.00');
+    expect(reply).toContain('XAF'); // recipient gets XAF
+    expect(reply).toContain('₦2,000.00'); // Africa corridor fee
+    expect(reply).toContain('₦102,000.00'); // total debit
+    expect(reply).toContain('Reply *YES* to confirm');
+  });
+
+  it('creates a China supplier preview with simulated CNY conversion', async () => {
+    const { assistant } = buildServiceGraph();
+
+    const reply = await assistant.processCustomerMessage(
+      '2348012345678',
+      'pay china supplier ₦200,000',
+    );
+
+    expect(reply).toContain('China Supplier Payment Preview');
+    expect(reply).toContain('🇨🇳');
+    expect(reply).toContain('₦200,000.00');
+    expect(reply).toContain('CNY');
+    expect(reply).toContain('₦5,000.00'); // China corridor fee
+    expect(reply).toContain('₦205,000.00'); // total debit
+    expect(reply).toContain('Reply *YES* to confirm');
+  });
+
+  it('creates a vendor payment preview', async () => {
+    const { assistant } = buildServiceGraph();
+
+    const reply = await assistant.processCustomerMessage(
+      '2348012345678',
+      'Pay vendor Acme Stores ₦20,000',
+    );
+
+    expect(reply).toContain('Vendor Payment Preview');
+    expect(reply).toContain('Acme Stores');
+    expect(reply).toContain('₦20,000.00');
+    expect(reply).toContain('₦10.00'); // default transfer fee
+    expect(reply).toContain('₦20,010.00'); // total debit
+    expect(reply).toContain('Reply *YES* to confirm');
+  });
+
+  it('executes a cross-border payment after YES and debits amount + corridor fee', async () => {
+    const { assistant, mockFinancialService } = buildServiceGraph();
+
+    await assistant.processCustomerMessage('2348012345678', 'Pay Cameroon supplier ₦100,000');
+    const reply = await assistant.processCustomerMessage('2348012345678', 'YES');
+
+    expect(reply).toContain('Payment Sent!');
+    expect(reply).toContain('Cameroon');
+    expect(reply).toContain('₦100,000.00');
+    expect(reply).toMatch(/MOCK_PAY_/);
+    expect(reply).toMatch(/Available Balance.*₦/);
+
+    // ₦250,000 - ₦100,000 - ₦2,000 fee = ₦148,000
+    const balance = await mockFinancialService.getBalance('cust-adebayo-001');
+    expect(balance.availableBalanceKobo).toBe(14_800_000n);
+  });
+
+  it('executes a vendor payment after YES', async () => {
+    const { assistant, mockFinancialService } = buildServiceGraph();
+
+    await assistant.processCustomerMessage('2348012345678', 'Pay vendor Acme Stores ₦20,000');
+    const reply = await assistant.processCustomerMessage('2348012345678', 'YES');
+
+    expect(reply).toContain('Payment Sent!');
+    expect(reply).toContain('Acme Stores');
+    expect(reply).toMatch(/MOCK_PAY_/);
+
+    // ₦250,000 - ₦20,000 - ₦10 fee = ₦229,990
+    const balance = await mockFinancialService.getBalance('cust-adebayo-001');
+    expect(balance.availableBalanceKobo).toBe(22_999_000n);
+  });
+
+  it('asks for an amount when cross-border payment has none', async () => {
+    const { assistant } = buildServiceGraph();
+
+    const reply = await assistant.processCustomerMessage('2348012345678', 'Pay Cameroon supplier');
+
+    expect(reply).toContain('How much?');
+    expect(reply).toContain('Pay Cameroon supplier ₦100,000');
+  });
+
+  it('cancels a pending cross-border payment on CANCEL', async () => {
+    const { assistant, mockFinancialService } = buildServiceGraph();
+
+    await assistant.processCustomerMessage('2348012345678', 'Pay China supplier ₦200,000');
+    const reply = await assistant.processCustomerMessage('2348012345678', 'CANCEL');
+
+    expect(reply).toContain('Transfer Cancelled');
+
+    // Balance must remain untouched: ₦250,000
+    const balance = await mockFinancialService.getBalance('cust-adebayo-001');
+    expect(balance.availableBalanceKobo).toBe(25_000_000n);
+  });
+
+  it('rejects a cross-border payment exceeding the available balance', async () => {
+    const { assistant } = buildServiceGraph();
+
+    // Babatunde only has ₦75,000
+    const reply = await assistant.processCustomerMessage(
+      '2348034567890',
+      'Pay Ghana supplier ₦100,000',
+    );
+
+    expect(reply).toMatch(/INSUFFICIENT BALANCE|insufficient/i);
+  });
+
   it('purchases ₦1,000 airtime successfully', async () => {
     const { assistant } = buildServiceGraph();
 

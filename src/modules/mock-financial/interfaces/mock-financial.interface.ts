@@ -1,5 +1,7 @@
 // Interfaces and Types for Mock Financial Operations
 
+import type { MockPaymentDestinationType } from '../mock-financial.constants';
+
 export interface MockAccountBalance {
   customerId: string;
   customerName: string;
@@ -52,8 +54,22 @@ export interface MockTransferExecutionResult {
   newBalanceKobo: bigint;
   status: 'SUCCESSFUL' | 'FAILED';
   settlementMessage: string;
+  /** Underlying transaction type (TRANSFER / PAYMENT / ...) */
+  transactionType?: string;
   batchItems?: Array<{ recipientName: string; amountKobo: bigint; reference: string }>;
   isSimulated: true;
+}
+
+export interface MockCrossBorderPreview extends MockTransferPreview {
+  destinationType: MockPaymentDestinationType;
+  country?: string;
+  flag?: string;
+  /** Foreign currency code the recipient receives (XAF, GHS, CNY, ...) */
+  foreignCurrency?: string;
+  /** Formatted foreign amount, e.g. "38,500 XAF" */
+  foreignAmountText?: string;
+  /** Simulated FX rate text, e.g. "₦1 ≈ 0.385 XAF" */
+  rateText?: string;
 }
 
 export interface MockDepositResult {

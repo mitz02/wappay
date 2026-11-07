@@ -6,6 +6,7 @@ import {
 import { ConversationHistoryService } from './conversation-history.service';
 import { IntentParserService, MockFinancialIntent } from './intent-parser.service';
 import { MockFinancialService } from '../../mock-financial/services/mock-financial.service';
+import type { MockCrossBorderPreview } from '../../mock-financial/interfaces/mock-financial.interface';
 import { WAPPAY_SYSTEM_PROMPT, AI_CONSTANTS } from '../ai.constants';
 import { formatKoboToNaira } from '../../../common/types';
 import {
@@ -318,6 +319,19 @@ export class AIAssistantService {
             parsed.confirmationWord || 'yes',
           );
 
+          if (result.transactionType === 'PAYMENT') {
+            reply =
+              `✅ *Payment Sent!*\n\n` +
+              `• *Amount:* ${formatKoboToNaira(result.amountKobo)}\n` +
+              `• *Paid to:* ${result.recipientName}\n` +
+              `• *Account:* ${result.recipientAccountNumber} (${result.recipientBankName})\n` +
+              `• *Fee:* ${formatKoboToNaira(result.feeKobo)}\n` +
+              `• *Reference:* \`${result.internalReference}\`\n` +
+              `• *Available Balance:* *${formatKoboToNaira(result.newBalanceKobo)}*\n\n` +
+              `_Note: This was a simulated payment. No real money was moved._`;
+            break;
+          }
+
           reply =
             `✅ *Simulated Transfer Successful!*\n\n` +
             `• *Amount:* ${formatKoboToNaira(result.amountKobo)}\n` +
@@ -495,6 +509,37 @@ export class AIAssistantService {
             `• *Transfer Fee:* *${formatKoboToNaira(preview.feeKobo)}*\n` +
             `• *Total Debit:* *${formatKoboToNaira(preview.totalDebitKobo)}*\n\n` +
             `_Reply *YES* to confirm this transfer or *CANCEL* to abort (valid for ${preview.expiresInMinutes} minutes)._`;
+          break;
+        }
+
+        // --- E2. Cross-border (Africa / China) & vendor payments ---
+        case MockFinancialIntent.CROSS_BORDER_PAYMENT:
+        case MockFinancialIntent.VENDOR_PAYMENT: {
+          if (!parsed.amountKobo) {
+            const example =
+              parsed.destinationType === 'CHINA'
+                ? 'Pay China supplier ₦500,000'
+                : parsed.destinationType === 'AFRICA'
+                  ? `Pay ${parsed.destinationCountry} supplier ₦100,000`
+                  : 'Pay vendor Acme Stores ₦20,000';
+            reply =
+              `💰 *How much?*\n\n` +
+              `Tell me the amount to send, e.g.:\n` +
+              `_${example}_`;
+            break;
+          }
+
+          const paymentPreview = await this.mockFinancialService.createCrossBorderPreview(
+            customer.id,
+            {
+              destinationType: parsed.destinationType!,
+              country: parsed.destinationCountry,
+              recipientName: parsed.recipient,
+              amountKobo: parsed.amountKobo,
+            },
+          );
+
+          reply = this.formatPaymentPreview(paymentPreview);
           break;
         }
 
@@ -909,6 +954,43 @@ export class AIAssistantService {
     } catch (err: any) {
       return withBrand(`Could not load history: ${err.message}`);
     }
+  }
+
+  /**
+   * Formats a cross-border / China supplier / vendor payment preview.
+   */
+  private formatPaymentPreview(p: MockCrossBorderPreview): string {
+    if (p.destinationType === 'VENDOR') {
+      return (
+        `🏪 *Vendor Payment Preview*\n\n` +
+        `• *Vendor:* *${p.recipientName}*\n` +
+        `• *Account:* \`${p.recipientAccountNumber}\` (${p.recipientBankName})\n` +
+        `• *Amount:* *${formatKoboToNaira(p.amountKobo)}*\n` +
+        `• *Fee:* ${formatKoboToNaira(p.feeKobo)}\n` +
+        `• *Total Debit:* *${formatKoboToNaira(p.totalDebitKobo)}*\n` +
+        `• *Type:* Simulated vendor payment\n\n` +
+        `_Reply *YES* to confirm this payment or *CANCEL* to abort (valid for ${p.expiresInMinutes} minutes)._`
+      );
+    }
+
+    const flag = p.flag || '🌍';
+    const title =
+      p.destinationType === 'CHINA'
+        ? `🇨🇳 *China Supplier Payment Preview* 🇨🇳`
+        : `${flag} *Cross-Border Payment Preview* ${flag}`;
+
+    return (
+      `${title}\n\n` +
+      `• *Destination:* ${p.country} ${flag}\n` +
+      `• *Recipient:* *${p.recipientName}*\n` +
+      `• *Account:* \`${p.recipientAccountNumber}\`\n` +
+      `• *You send:* ${formatKoboToNaira(p.amountKobo)}\n` +
+      `• *Recipient gets:* *${p.foreignAmountText}* _(simulated: ${p.rateText})_\n` +
+      `• *Transfer fee:* ${formatKoboToNaira(p.feeKobo)}\n` +
+      `• *Total Debit:* *${formatKoboToNaira(p.totalDebitKobo)}*\n` +
+      `• *Rail:* Simulated · ${p.recipientBankName}\n\n` +
+      `_Reply *YES* to confirm this payment or *CANCEL* to abort (valid for ${p.expiresInMinutes} minutes)._`
+    );
   }
 
   /**

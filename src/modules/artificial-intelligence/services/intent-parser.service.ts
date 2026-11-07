@@ -1,5 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { parseNairaToKobo } from '../../../common/types';
+import {
+  findAfricanCorridor,
+  MOCK_CORRIDORS,
+  type MockCorridor,
+} from '../../mock-financial/mock-financial.constants';
 
 export enum MockFinancialIntent {
   BALANCE_ENQUIRY = 'BALANCE_ENQUIRY',
@@ -17,6 +22,8 @@ export enum MockFinancialIntent {
   REGISTER = 'REGISTER',
   CONFIRM_TRANSACTION = 'CONFIRM_TRANSACTION',
   CANCEL_TRANSACTION = 'CANCEL_TRANSACTION',
+  CROSS_BORDER_PAYMENT = 'CROSS_BORDER_PAYMENT',
+  VENDOR_PAYMENT = 'VENDOR_PAYMENT',
   HELP = 'HELP',
   GENERAL = 'GENERAL',
 }
@@ -38,6 +45,8 @@ export interface ParsedFinancialIntent {
   contactName?: string;
   accountNumber?: string;
   bankName?: string;
+  destinationType?: 'AFRICA' | 'CHINA' | 'VENDOR';
+  destinationCountry?: string;
   rawText: string;
 }
 
@@ -281,6 +290,14 @@ export class IntentParserService {
         hasExplicitPlan,
         rawText: raw,
       };
+    }
+
+    // 9b. Cross-border (Africa / China) & vendor payments — BEFORE the generic
+    //     transfer parser so "Pay Cameroon supplier ₦100,000" is never parsed
+    //     as a failed domestic transfer to recipient "Cameroon".
+    const paymentIntent = this.parseCrossBorderOrVendorPayment(raw, lower);
+    if (paymentIntent) {
+      return paymentIntent;
     }
 
     // 10. Fund Transfer (Send / Transfer)
@@ -615,6 +632,97 @@ export class IntentParserService {
       'fairmoney',
     ];
     return bankWords.includes(token.toLowerCase());
+  }
+
+  /**
+   * Parses cross-border payments (African corridors / China suppliers) and
+   * generic vendor payments. Requires a payment verb plus a destination hint
+   * (country keyword, "china", or vendor/supplier/merchant).
+   */
+  private parseCrossBorderOrVendorPayment(
+    raw: string,
+    lower: string,
+  ): ParsedFinancialIntent | undefined {
+    const hasVerb = /\b(pay|payment|send|transfer|remit|settle)\b/.test(lower);
+    if (!hasVerb) return undefined;
+
+    const chinaHit = MOCK_CORRIDORS.CHINA.keywords.some((k) => lower.includes(k));
+    const corridor = chinaHit ? undefined : findAfricanCorridor(lower);
+    const vendorHit = /\b(vendors?|suppliers?|merchants?)\b/.test(lower);
+
+    if (!chinaHit && !corridor && !vendorHit) return undefined;
+
+    const amountKobo = this.extractMonetaryAmount(raw);
+    const recipient = this.extractPaymentPayee(raw, chinaHit, corridor);
+
+    if (chinaHit) {
+      return {
+        intent: MockFinancialIntent.CROSS_BORDER_PAYMENT,
+        confidence: 0.97,
+        destinationType: 'CHINA',
+        destinationCountry: MOCK_CORRIDORS.CHINA.country,
+        amountKobo,
+        recipient,
+        rawText: raw,
+      };
+    }
+    if (corridor) {
+      return {
+        intent: MockFinancialIntent.CROSS_BORDER_PAYMENT,
+        confidence: 0.97,
+        destinationType: 'AFRICA',
+        destinationCountry: corridor.country,
+        amountKobo,
+        recipient,
+        rawText: raw,
+      };
+    }
+    return {
+      intent: MockFinancialIntent.VENDOR_PAYMENT,
+      confidence: 0.95,
+      destinationType: 'VENDOR',
+      amountKobo,
+      recipient,
+      rawText: raw,
+    };
+  }
+
+  /**
+   * Strips payment verbs, amounts, currency words and destination keywords
+   * from the message to isolate an optional payee name (e.g. "Acme Stores").
+   */
+  private extractPaymentPayee(
+    raw: string,
+    chinaHit: boolean,
+    corridor?: MockCorridor,
+  ): string | undefined {
+    let text = raw;
+    // Remove monetary amounts (₦100,000 / 50k / 5,000 naira / 20.5 ...)
+    text = text.replace(
+      /(?:ngn|₦)?\s*[0-9][0-9,]*(?:\.[0-9]+)?\s*(?:k|thousand)?(?:\s*naira)?/gi,
+      ' ',
+    );
+    // Remove payment verbs, filler words and role words
+    text = text.replace(
+      /\b(pay|payment|please|send|transfer|remit|settle|money|funds|the|my|a|an|to|for|of|from|in|into|across|via|supplier|suppliers|vendor|vendors|merchant|merchants|business)\b/gi,
+      ' ',
+    );
+    // Remove destination keywords (china aliases + corridor aliases)
+    if (chinaHit) {
+      text = text.replace(
+        new RegExp(MOCK_CORRIDORS.CHINA.keywords.join('|'), 'gi'),
+        ' ',
+      );
+    }
+    if (corridor) {
+      const pattern = corridor.keywords
+        .map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        .join('|');
+      text = text.replace(new RegExp(pattern, 'gi'), ' ');
+    }
+    text = text.replace(/[₦$,.]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (text.length < 2) return undefined;
+    return text;
   }
 
   private extractMonetaryAmount(text: string): bigint | undefined {    const match = text.match(/(?:ngn|₦)?\s*([0-9kK,.]+)/i);

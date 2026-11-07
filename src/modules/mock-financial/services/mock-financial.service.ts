@@ -21,12 +21,15 @@ import {
   MOCK_FINANCIAL_CONSTANTS,
   MOCK_VAS_PACKAGES,
   MOCK_BANKS,
+  resolveCorridor,
+  type MockPaymentDestinationType,
 } from '../mock-financial.constants';
 import {
   MockAccountBalance,
   MockTransactionSummary,
   MockTransferPreview,
   MockTransferExecutionResult,
+  MockCrossBorderPreview,
   MockDepositResult,
   MockWithdrawalResult,
   MockVasResult,
@@ -558,6 +561,145 @@ export class MockFinancialService {
   }
 
   /**
+   * Creates a pending preview for a simulated cross-border payment
+   * (African corridor / China supplier) or a vendor payment.
+   * The pending transaction is executed by the shared confirmTransfer flow.
+   */
+  async createCrossBorderPreview(
+    senderCustomerId: string,
+    params: {
+      destinationType: MockPaymentDestinationType;
+      country?: string;
+      recipientName?: string;
+      amountKobo: bigint;
+    },
+  ): Promise<MockCrossBorderPreview> {
+    const { destinationType, amountKobo } = params;
+    if (amountKobo <= 0n) {
+      throw new FinancialInvariantException('Payment amount must be strictly positive.');
+    }
+
+    const sender = await this.prisma.customerProfile.findUnique({
+      where: { id: senderCustomerId },
+    });
+    if (!sender) {
+      throw new NotFoundException(`Sender customer ${senderCustomerId} not found.`);
+    }
+
+    if (amountKobo > sender.dailyLimitKobo) {
+      throw new BadRequestException(
+        `Amount exceeds daily limit of ₦${Number(sender.dailyLimitKobo) / 100}`,
+      );
+    }
+
+    const corridor = resolveCorridor(destinationType, params.country);
+    if (destinationType !== 'VENDOR' && !corridor) {
+      throw new BadRequestException(
+        `Unsupported destination: ${params.country || destinationType}. Supported: Cameroon, Ghana, Kenya, South Africa, Uganda, Tanzania, Côte d'Ivoire, Senegal, Rwanda, China.`,
+      );
+    }
+
+    const feeKobo =
+      destinationType === 'VENDOR'
+        ? MOCK_FINANCIAL_CONSTANTS.DEFAULT_TRANSFER_FEE_KOBO
+        : destinationType === 'CHINA'
+          ? MOCK_FINANCIAL_CONSTANTS.CROSS_BORDER_FEE_KOBO.CHINA
+          : MOCK_FINANCIAL_CONSTANTS.CROSS_BORDER_FEE_KOBO.AFRICA;
+
+    const totalRequiredKobo = amountKobo + feeKobo;
+
+    const senderAccount = await this.prisma.ledgerAccount.findUnique({
+      where: { accountNumber: `21000-${senderCustomerId}` },
+    });
+    const currentBalance = senderAccount?.balanceKobo ?? 0n;
+    if (currentBalance < totalRequiredKobo) {
+      throw new InsufficientFundsException(
+        `Insufficient funds. Required: ₦${Number(totalRequiredKobo) / 100}, Available: ₦${Number(currentBalance) / 100}`,
+      );
+    }
+
+    const recipientName =
+      params.recipientName?.trim() ||
+      (corridor ? `${corridor.country} Supplier` : 'Vendor');
+
+    const recipientAccountNumber = corridor
+      ? `${corridor.iso}-${corridor.currency}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`
+      : `VEN-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    const recipientBankName = corridor
+      ? corridor.railLabel
+      : MOCK_BANKS['058'] || 'Commercial Bank';
+
+    const internalReference = `MOCK_PAY_${Date.now()}_${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+    const challengeToken = crypto.randomBytes(12).toString('hex');
+    const expiresAt = new Date(
+      Date.now() + MOCK_FINANCIAL_CONSTANTS.CONFIRMATION_EXPIRY_MINUTES * 60 * 1000,
+    );
+
+    const transaction = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.transaction.create({
+        data: {
+          internalReference,
+          idempotencyKey: `IDEMP_${internalReference}`,
+          customerId: senderCustomerId,
+          type: TransactionType.PAYMENT,
+          state: TransactionState.AWAITING_AUTHORIZATION,
+          amountKobo,
+          feeKobo,
+          currency: 'NGN',
+          destinationAccountNumber: recipientAccountNumber,
+          destinationBankCode: recipientBankName,
+          destinationAccountName: recipientName,
+          recipientAlias: corridor
+            ? `${corridor.flag} ${corridor.country} · ${corridor.currency}`
+            : `Vendor · ${recipientName}`,
+          isSimulated: true,
+        },
+      });
+
+      await tx.transactionAuthorization.create({
+        data: {
+          transactionId: created.id,
+          challengeToken,
+          expiresAt,
+        },
+      });
+
+      return created;
+    });
+
+    let foreignAmountText: string | undefined;
+    let rateText: string | undefined;
+    if (corridor) {
+      const foreignUnits = (Number(amountKobo) / 100) * corridor.perNaira;
+      foreignAmountText = `${foreignUnits.toLocaleString('en-US', {
+        maximumFractionDigits: 2,
+      })} ${corridor.currency}`;
+      rateText = `₦1 ≈ ${Number(corridor.perNaira.toFixed(4))} ${corridor.currency}`;
+    }
+
+    return {
+      transactionId: transaction.id,
+      internalReference,
+      amountKobo,
+      feeKobo,
+      totalDebitKobo: totalRequiredKobo,
+      currency: 'NGN',
+      recipientName,
+      recipientAccountNumber,
+      recipientBankName,
+      challengeToken,
+      expiresInMinutes: MOCK_FINANCIAL_CONSTANTS.CONFIRMATION_EXPIRY_MINUTES,
+      isSimulated: true,
+      destinationType,
+      country: corridor?.country,
+      flag: corridor?.flag,
+      foreignCurrency: corridor?.currency,
+      foreignAmountText,
+      rateText,
+    };
+  }
+
+  /**
    * Phase 2: Authorizes and atomically executes a pending transfer upon explicit confirmation.
    */
   /**
@@ -806,6 +948,7 @@ export class MockFinancialService {
     ]);
 
     const updatedBalance = (await this.getBalance(senderCustomerId)).availableBalanceKobo;
+    const isPayment = txn.type === TransactionType.PAYMENT;
 
     return {
       transactionId: txn.id,
@@ -815,10 +958,16 @@ export class MockFinancialService {
       totalDebitedKobo: totalRequiredKobo,
       recipientName: txn.destinationAccountName || 'Beneficiary',
       recipientAccountNumber: txn.destinationAccountNumber || '',
-      recipientBankName: MOCK_BANKS[txn.destinationBankCode || '999'] || 'Commercial Bank',
+      recipientBankName:
+        MOCK_BANKS[txn.destinationBankCode || '999'] ||
+        txn.destinationBankCode ||
+        'Commercial Bank',
       newBalanceKobo: updatedBalance,
       status: 'SUCCESSFUL',
-      settlementMessage: 'Transfer simulated successfully on internal mock rails.',
+      transactionType: txn.type,
+      settlementMessage: isPayment
+        ? 'Payment simulated successfully on cross-border/vendor mock rails.'
+        : 'Transfer simulated successfully on internal mock rails.',
       isSimulated: true,
     };
   }

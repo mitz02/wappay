@@ -4,6 +4,7 @@ import { FlowEncryptionService, DecryptedFlowRequest } from '../services/flow-en
 import { FlowSessionService } from '../services/flow-session.service';
 import { RegistrationFlowHandler } from '../handlers/registration-flow.handler';
 import { DepositFlowHandler } from '../handlers/deposit-flow.handler';
+import { TransferPinFlowHandler } from '../handlers/transfer-pin-flow.handler';
 
 @Controller('flows')
 export class FlowEndpointController {
@@ -14,6 +15,7 @@ export class FlowEndpointController {
     private readonly sessionService: FlowSessionService,
     private readonly registrationHandler: RegistrationFlowHandler,
     private readonly depositHandler: DepositFlowHandler,
+    private readonly transferPinHandler: TransferPinFlowHandler,
   ) {}
 
   @Post('data')
@@ -48,6 +50,8 @@ export class FlowEndpointController {
         );
       } else if (session.flowType === 'DEPOSIT') {
         response = await this.depositHandler.handleFlowRequest(request, session);
+      } else if (session.flowType === 'TRANSFER_PIN') {
+        response = await this.transferPinHandler.handleFlowRequest(request, session);
       } else {
         throw new BadRequestException('Unknown flow type');
       }

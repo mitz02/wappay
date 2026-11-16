@@ -6,11 +6,19 @@ import { FlowSenderService } from './services/flow-sender.service';
 import { RegistrationWizardService } from './services/registration-wizard.service';
 import { RegistrationFlowHandler } from './handlers/registration-flow.handler';
 import { DepositFlowHandler } from './handlers/deposit-flow.handler';
+import { TransferPinFlowHandler } from './handlers/transfer-pin-flow.handler';
 import { WalletModule } from '../wallet/wallet.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
+import { MockFinancialModule } from '../mock-financial/mock-financial.module';
+import { AuthModule } from '../authentication/auth.module';
 
 @Module({
-  imports: [WalletModule, forwardRef(() => WhatsAppModule)],
+  imports: [
+    WalletModule,
+    MockFinancialModule,
+    forwardRef(() => AuthModule),
+    forwardRef(() => WhatsAppModule),
+  ],
   controllers: [FlowEndpointController],
   providers: [
     FlowEncryptionService,
@@ -19,6 +27,7 @@ import { WhatsAppModule } from '../whatsapp/whatsapp.module';
     RegistrationWizardService,
     RegistrationFlowHandler,
     DepositFlowHandler,
+    TransferPinFlowHandler,
   ],
   exports: [
     FlowEncryptionService,
@@ -27,6 +36,7 @@ import { WhatsAppModule } from '../whatsapp/whatsapp.module';
     RegistrationWizardService,
     RegistrationFlowHandler,
     DepositFlowHandler,
+    TransferPinFlowHandler,
   ],
 })
 export class WhatsAppFlowsModule {}

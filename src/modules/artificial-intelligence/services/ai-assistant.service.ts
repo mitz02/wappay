@@ -40,7 +40,7 @@ interface PendingGiftSession {
 }
 
 interface PendingTransferSession {
-  stage: 'AWAITING_DETAILS' | 'CONFIRM_DETAILS' | 'ENTER_PIN';
+  stage: 'AWAITING_DETAILS' | 'CONFIRM_DETAILS';
   recipient?: string;
   amountKobo?: bigint;
   preview?: any;
@@ -552,7 +552,9 @@ export class AIAssistantService {
             `• *Amount:* *${formatKoboToNaira(preview.amountKobo)}*\n` +
             `• *Transfer Fee:* *${formatKoboToNaira(preview.feeKobo)}*\n` +
             `• *Total Debit:* *${formatKoboToNaira(preview.totalDebitKobo)}*\n\n` +
-            `_Reply *YES* to confirm this transfer or *CANCEL* to abort (valid for ${preview.expiresInMinutes} minutes)._`;
+            `🔐 *Enter Transaction PIN:*\n` +
+            `Click the *Enter PIN* button below to open the secure input dialog to enter your 4-digit transaction PIN.\n` +
+            `_(or reply *CANCEL* to abort — valid for ${preview.expiresInMinutes} minutes)_`;
           break;
         }
 
@@ -2175,7 +2177,9 @@ export class AIAssistantService {
           `• *Amount:* *${formatKoboToNaira(preview.amountKobo)}*\n` +
           `• *Transfer Fee:* *${formatKoboToNaira(preview.feeKobo)}*\n` +
           `• *Total Debit:* *${formatKoboToNaira(preview.totalDebitKobo)}*\n\n` +
-          `_Reply *YES* to proceed to PIN entry or enter your 4-digit PIN to authorize (or *CANCEL* to abort)._`
+          `🔐 *Enter Transaction PIN:*\n` +
+          `Click the *Enter PIN* button below to open the secure input dialog to enter your 4-digit transaction PIN.\n` +
+          `_(or reply *CANCEL* to abort)_`
         );
       } catch (err: any) {
         this.pendingTransferSessions.delete(customer.id);
@@ -2185,39 +2189,58 @@ export class AIAssistantService {
 
     // Stage 2: Confirm details -> transition to enter PIN or accept PIN directly
     if (session.stage === 'CONFIRM_DETAILS') {
-      const isPinDirect = /^\d{4}$/.test(trimmed);
-      const isConfirm = ['yes', 'confirm', 'proceed', 'ok', 'y', 'yep', 'sure', 'approve'].includes(lower);
-
-      if (isConfirm) {
-        session.stage = 'ENTER_PIN';
-        this.pendingTransferSessions.set(customer.id, session);
+      if (['enter_pin', 'enter pin', 'ENTER_PIN', 'enter-pin'].includes(lower)) {
         return (
-          `🔐 *Enter Transaction PIN*\n\n` +
-          `Please enter your 4-digit transaction PIN to authorize this transfer:\n` +
-          `_(or reply *CANCEL* to abort)_`
+          '🔐 *Enter Transaction PIN*\n\n' +
+          'Please enter your 4-digit transaction PIN in the input dialog to authorize this transfer:\n' +
+          '_(or reply *CANCEL* to abort)_'
         );
       }
 
-      if (isPinDirect) {
-        return await this.executeTransferWithPin(customer, trimmed, session);
-      }
-
-      return `_Reply *YES* to proceed to PIN entry, enter your 4-digit PIN to authorize, or *CANCEL* to abort._`;
-    }
-
-    // Stage 3: Enter PIN -> Execute transfer (Step 4: Success or Failure response)
-    if (session.stage === 'ENTER_PIN') {
-      const pinMatch = trimmed.match(/^(?:pin[:\s]*)?([0-9]{4})$/i);
-      if (!pinMatch) {
+      // Security check: reject PIN typed in chat
+      if (/^\d{4}$/.test(trimmed) || /^(?:pin[:\s]*)?\d{4}$/i.test(trimmed)) {
         return (
-          `❌ *Invalid PIN Format*\n\n` +
-          `Please enter your 4-digit transaction PIN (e.g. 1234) or reply *CANCEL* to abort.`
+          '⚠️ *Security Warning: PIN Cannot Be Sent as Chat*\n\n' +
+          'For your security, transaction PINs cannot be sent as chat messages.\n\n' +
+          'Please click the *Enter PIN* button below to open the secure input dialog to enter your PIN.\n' +
+          '_(or reply *CANCEL* to abort)_'
         );
       }
-      return await this.executeTransferWithPin(customer, pinMatch[1], session);
+
+      // Allow structured input payloads (e.g. from input forms/simulators)
+      try {
+        const parsedJson = JSON.parse(trimmed);
+        if (parsedJson.pin && /^\d{4}$/.test(String(parsedJson.pin))) {
+          return await this.executeTransferWithPin(customer, String(parsedJson.pin), session);
+        }
+      } catch {}
+
+      return '_Please click the *Enter PIN* button below to open the secure input dialog, or reply *CANCEL* to abort._';
     }
 
     return null;
+  }
+
+  
+  /**
+   * Authorizes and executes a pending transfer using a PIN submitted via secure input (e.g. WhatsApp Flow).
+   */
+  async submitTransferPin(normalizedPhone: string, pin: string): Promise<string> {
+    const customer = await this.mockFinancialService.resolveMockCustomer(normalizedPhone);
+    const session = this.pendingTransferSessions.get(customer.id);
+    if (!session || !session.preview) {
+      return '⚠️ *No Active Transfer*\n\nThere is no pending transfer awaiting authorization.';
+    }
+
+    const pinMatch = pin.trim().match(/^\d{4}$/);
+    if (!pinMatch) {
+      return (
+        '❌ *Invalid PIN Format*\n\n' +
+        'Your transaction PIN must be exactly 4 digits.'
+      );
+    }
+
+    return await this.executeTransferWithPin(customer, pinMatch[0], session);
   }
 
   private async executeTransferWithPin(

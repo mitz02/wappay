@@ -556,6 +556,62 @@ export const DEPOSIT_FLOW_JSON: Record<string, any> = {
   ],
 };
 
+// ─── Transfer PIN Flow (Meta Flows v5.0 — secure PIN input) ────────────────
+
+export const TRANSFER_PIN_FLOW_JSON: Record<string, any> = {
+  version: '5.0',
+  screens: [
+    {
+      id: 'ENTER_PIN',
+      title: 'Authorize Transfer',
+      terminal: true,
+      data: {
+        recipient_name: { type: 'string' },
+        amount: { type: 'string' },
+        account_info: { type: 'string' },
+      },
+      layout: {
+        type: 'SingleColumnLayout',
+        children: [
+          { type: 'TextHeading', text: 'Enter Transaction PIN' },
+          {
+            type: 'TextSubheading',
+            text: 'Authorize your transfer securely',
+          },
+          {
+            type: 'Form',
+            name: 'pin_form',
+            children: [
+              {
+                type: 'TextInput',
+                name: 'pin',
+                label: '4-Digit Transaction PIN',
+                required: true,
+                'input-type': 'password',
+                pattern: '^\\d{4}$',
+                'min-chars': 4,
+                'max-chars': 4,
+                'helper-text': 'Enter your secret 4-digit PIN',
+                'error-message': 'PIN must be exactly 4 digits',
+              },
+            ],
+          },
+          {
+            type: 'Footer',
+            label: 'Authorize & Send',
+            'on-click-action': {
+              name: 'complete',
+              payload: {
+                pin: '${form.pin}',
+              },
+            },
+          },
+        ],
+      },
+    },
+  ],
+};
+
 // ─── Flow IDs (configured via env) ──────────────────────────────────────────
 
 export function getRegistrationFlowId(): string {
@@ -564,4 +620,8 @@ export function getRegistrationFlowId(): string {
 
 export function getDepositFlowId(): string {
   return process.env.WHATSAPP_DEPOSIT_FLOW_ID || '';
+}
+
+export function getTransferPinFlowId(): string {
+  return process.env.WHATSAPP_TRANSFER_PIN_FLOW_ID || process.env.WHATSAPP_PIN_FLOW_ID || '';
 }

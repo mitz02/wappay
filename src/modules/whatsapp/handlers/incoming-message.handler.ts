@@ -20,9 +20,10 @@ import { FlowSenderService } from '../../whatsapp-flows/services/flow-sender.ser
 import { RegistrationWizardService, WizardResult } from '../../whatsapp-flows/services/registration-wizard.service';
 import { RegistrationFlowHandler } from '../../whatsapp-flows/handlers/registration-flow.handler';
 import { DepositFlowHandler } from '../../whatsapp-flows/handlers/deposit-flow.handler';
+import { TransferPinFlowHandler } from '../../whatsapp-flows/handlers/transfer-pin-flow.handler';
 import { WalletService } from '../../wallet/wallet.service';
 import { withBrand, formatNaira } from '../../whatsapp-flows/utils/brand';
-import { getRegistrationFlowId } from '../../whatsapp-flows/flows/flow-definitions';
+import { getRegistrationFlowId, getTransferPinFlowId } from '../../whatsapp-flows/flows/flow-definitions';
 
 @Injectable()
 export class IncomingMessageHandler {
@@ -40,6 +41,7 @@ export class IncomingMessageHandler {
     @Optional() private readonly registrationWizard?: RegistrationWizardService,
     @Optional() private readonly registrationFlowHandler?: RegistrationFlowHandler,
     @Optional() private readonly depositFlowHandler?: DepositFlowHandler,
+    @Optional() private readonly transferPinFlowHandler?: TransferPinFlowHandler,
     @Optional() private readonly walletService?: WalletService,
   ) {}
 
@@ -154,6 +156,16 @@ export class IncomingMessageHandler {
         message.id,
       );
       return WHATSAPP_TEST_RESPONSES.UNSUPPORTED_TYPE_REPLY;
+    }
+
+    // 3.5 Handle Enter PIN button click
+    if (textBody && textBody.trim().toUpperCase() === 'ENTER_PIN') {
+      const flowSent = await this.trySendTransferPinFlow(normalizedPhone, message.id);
+      if (flowSent) {
+        const reply = withBrand('Please enter your 4-digit PIN in the form that just appeared.');
+        await this.messageService.sendReply(normalizedPhone, reply, message.id);
+        return reply;
+      }
     }
 
     // 4. Registration: WhatsApp Flow form (TextInput/Dropdown) first, wizard fallback
@@ -413,6 +425,33 @@ export class IncomingMessageHandler {
         ).catch(async () => {
           await this.messageService.sendReply(normalizedPhone, replyText, message.id);
         });
+      } else if (
+        replyText.includes('Simulated Transfer Confirmation') ||
+        replyText.includes('Transfer Confirmation')
+      ) {
+        let flowSent = false;
+        const flowId = getTransferPinFlowId();
+        if (flowId && this.flowSessionService && this.flowSenderService) {
+          flowSent = await this.trySendTransferPinFlow(normalizedPhone, message.id);
+        }
+
+        if (!flowSent) {
+          await this.messageService
+            .sendInteractiveButtons(
+              normalizedPhone,
+              replyText,
+              [
+                { id: 'ENTER_PIN', title: '🔐 Enter PIN' },
+                { id: 'CANCEL', title: '❌ Cancel' },
+              ],
+              undefined,
+              'from WappPay',
+              message.id,
+            )
+            .catch(async () => {
+              await this.messageService.sendReply(normalizedPhone, replyText, message.id);
+            });
+        }
       } else {
         await this.messageService.sendReply(normalizedPhone, replyText, message.id);
       }
@@ -586,6 +625,10 @@ export class IncomingMessageHandler {
       return this.completeDepositFromFlow(normalizedPhone, flowToken, responseData, messageId);
     }
 
+    if (session.flowType === 'TRANSFER_PIN' || responseData.pin) {
+      return this.completeTransferFromFlow(normalizedPhone, flowToken, responseData, messageId);
+    }
+
     const reply = withBrand('Unknown flow type. Please try again.');
     await this.messageService.sendReply(normalizedPhone, reply, messageId);
     return reply;
@@ -722,6 +765,67 @@ export class IncomingMessageHandler {
       const reply = withBrand('Deposit failed. Please try again.');
       await this.messageService.sendReply(normalizedPhone, reply, messageId);
       return reply;
+    }
+  }
+
+  private async completeTransferFromFlow(
+    normalizedPhone: string,
+    flowToken: string,
+    responseData: Record<string, any>,
+    messageId: string,
+  ): Promise<string> {
+    try {
+      const pin = responseData.pin;
+      if (!pin) {
+        const reply = withBrand('❌ No PIN provided. Transfer cancelled.');
+        await this.messageService.sendReply(normalizedPhone, reply, messageId);
+        return reply;
+      }
+
+      const reply = await this.aiAssistantService.submitTransferPin(normalizedPhone, String(pin));
+      await this.messageService.sendReply(normalizedPhone, reply, messageId);
+      return reply;
+    } catch (err: any) {
+      this.logger.error(`Transfer flow completion error: ${err.message}`);
+      const reply = withBrand('❌ Transfer failed. Please try again.');
+      await this.messageService.sendReply(normalizedPhone, reply, messageId);
+      return reply;
+    }
+  }
+
+  private async trySendTransferPinFlow(
+    normalizedPhone: string,
+    messageId?: string,
+  ): Promise<boolean> {
+    const flowId = getTransferPinFlowId();
+    if (!flowId || !this.flowSessionService || !this.flowSenderService) {
+      return false;
+    }
+
+    try {
+      const profile = await this.prisma.customerProfile.findFirst({
+        where: { whatsappNumber: normalizedPhone },
+      });
+      const flowToken = await this.flowSessionService.createSession(
+        'TRANSFER_PIN',
+        profile?.id,
+        { whatsapp_number: normalizedPhone },
+      );
+
+      return await this.flowSenderService.sendFlow({
+        to: normalizedPhone,
+        flowId,
+        flowToken,
+        cta: 'Enter PIN',
+        body: 'Please enter your 4-digit transaction PIN to authorize this transfer.',
+        header: 'Authorize Transfer',
+        footer: 'from WappPay',
+        startScreen: 'ENTER_PIN',
+        replyToMessageId: messageId,
+      });
+    } catch (err: any) {
+      this.logger.warn(`Transfer PIN Flow send failed: ${err.message}`);
+      return false;
     }
   }
 

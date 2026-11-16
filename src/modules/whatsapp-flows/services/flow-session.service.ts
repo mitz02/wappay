@@ -11,7 +11,7 @@ export class FlowSessionService {
   constructor(private readonly prisma: PrismaService) {}
 
   async createSession(
-    flowType: 'REGISTRATION' | 'DEPOSIT',
+    flowType: 'REGISTRATION' | 'DEPOSIT' | 'TRANSFER_PIN',
     customerId?: string,
     initialData?: Record<string, any>,
   ): Promise<string> {
@@ -88,7 +88,7 @@ export class FlowSessionService {
 
   async getActiveSessionByCustomer(
     customerId: string,
-    flowType: 'REGISTRATION' | 'DEPOSIT',
+    flowType: 'REGISTRATION' | 'DEPOSIT' | 'TRANSFER_PIN',
   ) {
     return this.prisma.flowSession.findFirst({
       where: {

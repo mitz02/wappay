@@ -251,6 +251,66 @@ describe('AIAssistantService', () => {
     expect(reply).toContain('Transfer Cancelled');
   });
 
+  it('streamlines transfer flow in <= 4 steps from intent to PIN to success', async () => {
+    // Step 1: User expresses intent to send money to someone (details missing)
+    const reply1 = await service.processCustomerMessage('2348012345678', 'I want to send money to someone');
+    expect(reply1).toContain('Missing Transfer Details');
+    expect(reply1).toContain('Please specify both');
+
+    // Step 2: User provides recipient and amount -> Confirms details of user
+    const reply2 = await service.processCustomerMessage('2348012345678', '5000 to Mum');
+    expect(mockFinancialService.createTransferPreview).toHaveBeenCalledWith('cust-123', 'Mum', 500_000n);
+    expect(reply2).toContain('Simulated Transfer Confirmation');
+    expect(reply2).toContain('Jane Adeleke');
+    expect(reply2).toContain('₦5,000.00');
+
+    // Step 3: User confirms -> Prompt to enter transaction PIN
+    const reply3 = await service.processCustomerMessage('2348012345678', 'YES');
+    expect(reply3).toContain('Enter Transaction PIN');
+    expect(reply3).toContain('Please enter your 4-digit transaction PIN');
+
+    // Step 4: User inputs transaction PIN -> Success response!
+    const reply4 = await service.processCustomerMessage('2348012345678', '1234');
+    expect(mockFinancialService.confirmTransfer).toHaveBeenCalledWith('cust-123', '1234');
+    expect(reply4).toContain('Simulated Transfer Successful!');
+    expect(reply4).toContain('₦244,990.00');
+  });
+
+  it('streamlines transfer in 3 steps when details are given initially', async () => {
+    // Step 1: User says "Send 5000 naira to Mum" -> Confirms details
+    const reply1 = await service.processCustomerMessage('2348012345678', 'Send 5000 naira to Mum');
+    expect(reply1).toContain('Simulated Transfer Confirmation');
+    expect(reply1).toContain('Jane Adeleke');
+
+    // Step 2: User confirms -> Prompts for PIN
+    const reply2 = await service.processCustomerMessage('2348012345678', 'YES');
+    expect(reply2).toContain('Enter Transaction PIN');
+
+    // Step 3: User inputs PIN -> Success response
+    const reply3 = await service.processCustomerMessage('2348012345678', '1234');
+    expect(reply3).toContain('Simulated Transfer Successful!');
+  });
+
+  it('returns failure response when invalid PIN format is provided', async () => {
+    await service.processCustomerMessage('2348012345678', 'Send 5000 naira to Mum');
+    await service.processCustomerMessage('2348012345678', 'YES');
+
+    // Invalid PIN format
+    const reply = await service.processCustomerMessage('2348012345678', '99');
+    expect(reply).toContain('Invalid PIN Format');
+  });
+
+  it('returns failure response when transfer authorization fails', async () => {
+    mockFinancialService.confirmTransfer.mockRejectedValueOnce(new Error('Insufficient balance to complete transfer.'));
+
+    await service.processCustomerMessage('2348012345678', 'Send 5000 naira to Mum');
+    await service.processCustomerMessage('2348012345678', 'YES');
+
+    const reply = await service.processCustomerMessage('2348012345678', '1234');
+    expect(reply).toContain('Transfer Failed');
+    expect(reply).toContain('Insufficient balance to complete transfer.');
+  });
+
   // -------------------------------------------------------------------------
   // 6. Simulated Deposit
   // -------------------------------------------------------------------------

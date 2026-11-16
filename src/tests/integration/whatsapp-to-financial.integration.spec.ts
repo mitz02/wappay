@@ -235,8 +235,12 @@ describe('[Integration] Financial Simulations', () => {
     // Phase 1: create preview
     await assistant.processCustomerMessage('2348012345678', 'Send ₦5,000 to Mum');
 
-    // Phase 2: confirm
-    const reply = await assistant.processCustomerMessage('2348012345678', 'YES');
+    // Phase 2: confirm → now prompts for PIN (new 4-step flow)
+    const pinPrompt = await assistant.processCustomerMessage('2348012345678', 'YES');
+    expect(pinPrompt).toContain('PIN');
+
+    // Phase 3: enter PIN → success
+    const reply = await assistant.processCustomerMessage('2348012345678', '1234');
 
     expect(reply).toContain('Simulated Transfer Successful!');
     expect(reply).toContain('Jane Adeleke');
@@ -250,9 +254,10 @@ describe('[Integration] Financial Simulations', () => {
   it('reflects a reduced balance after a confirmed transfer', async () => {
     const { assistant, mockFinancialService } = buildServiceGraph();
 
-    // Phase 1 + Phase 2
+    // Phase 1 + Phase 2 + Phase 3 (PIN)
     await assistant.processCustomerMessage('2348012345678', 'Send ₦5,000 to Mum');
-    await assistant.processCustomerMessage('2348012345678', 'YES');
+    await assistant.processCustomerMessage('2348012345678', 'YES');   // returns PIN prompt
+    await assistant.processCustomerMessage('2348012345678', '1234');  // enter PIN → executes transfer
 
     // Verify actual balance in the store
     const balance = await mockFinancialService.getBalance('cust-adebayo-001');
@@ -435,17 +440,22 @@ describe('[Integration] Follow-Up Conversations (Multi-Turn)', () => {
     const preview = await assistant.processCustomerMessage('2348012345678', 'Send ₦5,000 to Mum');
     expect(preview).toContain('Reply *YES* to confirm');
 
-    // Turn 2: confirm — "yes" is in the confirmRegex
-    const confirmation = await assistant.processCustomerMessage('2348012345678', 'Yes');
+    // Turn 2: confirm — "yes" is in the confirmRegex → now returns PIN prompt
+    const pinPrompt2 = await assistant.processCustomerMessage('2348012345678', 'Yes');
+    expect(pinPrompt2).toContain('PIN');
+
+    // Turn 3: enter PIN → success
+    const confirmation = await assistant.processCustomerMessage('2348012345678', '1234');
     expect(confirmation).toContain('Simulated Transfer Successful!');
   });
 
   it('queries new balance after a confirmed transfer and gets updated figure', async () => {
     const { assistant, mockFinancialService } = buildServiceGraph();
 
-    // Execute transfer
+    // Execute transfer (3-step: preview → YES → PIN)
     await assistant.processCustomerMessage('2348012345678', 'Send ₦5,000 to Mum');
-    await assistant.processCustomerMessage('2348012345678', 'YES');
+    await assistant.processCustomerMessage('2348012345678', 'YES');   // PIN prompt
+    await assistant.processCustomerMessage('2348012345678', '1234');  // executes transfer
 
     // Now query balance
     const balanceReply = await assistant.processCustomerMessage('2348012345678', "What is my new balance?");
@@ -469,7 +479,10 @@ describe('[Integration] Follow-Up Conversations (Multi-Turn)', () => {
     expect(chiomaReply).not.toContain('Adebayo');
 
     // Adebayo confirms: must use HIS pending transfer (not Chioma's session)
-    const adebayoConfirm = await assistant.processCustomerMessage('2348012345678', 'YES');
+    // YES → PIN prompt, then PIN → success
+    const adebayoPinPrompt = await assistant.processCustomerMessage('2348012345678', 'YES');
+    expect(adebayoPinPrompt).toContain('PIN');
+    const adebayoConfirm = await assistant.processCustomerMessage('2348012345678', '1234');
     expect(adebayoConfirm).toContain('Simulated Transfer Successful!');
     expect(adebayoConfirm).toContain('Jane Adeleke');
   });

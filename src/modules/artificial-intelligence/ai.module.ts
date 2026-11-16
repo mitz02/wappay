@@ -10,6 +10,7 @@ import { GiftingModule } from '../gifting/gifting.module';
 import { WhatsAppFlowsModule } from '../whatsapp-flows/whatsapp-flows.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { RecipientsModule } from '../recipients/recipients.module';
+import { AuthModule } from '../authentication/auth.module';
 
 /**
  * AIModule
@@ -30,6 +31,7 @@ import { RecipientsModule } from '../recipients/recipients.module';
     forwardRef(() => WhatsAppFlowsModule),
     WalletModule,
     RecipientsModule,
+    AuthModule,
   ],
   providers: [
     AIService,

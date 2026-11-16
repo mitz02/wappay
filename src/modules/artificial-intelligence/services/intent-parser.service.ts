@@ -342,25 +342,34 @@ export class IntentParserService {
       }
     }
 
+    const parseAmount = (str: string): bigint | undefined => {
+      const clean = str.replace(/,/g, '').trim();
+      try {
+        if (clean.toLowerCase().endsWith('k')) {
+          const num = parseFloat(clean.slice(0, -1));
+          return parseNairaToKobo(num * 1000);
+        }
+        return parseNairaToKobo(clean);
+      } catch {
+        return undefined;
+      }
+    };
+
+    const isPlaceholderRecipient = (name?: string): boolean => {
+      if (!name) return true;
+      const lowerName = name.trim().toLowerCase();
+      return ['someone', 'somone', 'somebody', 'person', 'anybody', 'anyone', 'user'].includes(lowerName);
+    };
+
+    // A. Standard transfer regex: "send 5000 to Chioma", "transfer ₦10,000 to Adebayo", "pay 5k to Mum"
     const transferRegex =
-      /(?:send|transfer|pay)\s+(?:(?:ngn|₦)\s*)?([0-9kK,.]+)\s+(?:naira\s+)?(?:to\s+)?([a-zA-Z0-9_\s]+)/i;
+      /(?:(?:please\s+)?(?:i\s*(?:want|need|would\s*like)\s*to\s*)?(?:send|transfer|pay|remit))\s+(?:(?:ngn|₦)\s*)?([0-9kK,.]+)\s*(?:naira\s*)?(?:to\s+)?([a-zA-Z0-9_\s]+)/i;
     const transferMatch = raw.match(transferRegex);
 
     if (transferMatch) {
-      const amountStr = transferMatch[1].replace(/,/g, '');
-      const recipient = transferMatch[2].trim().replace(/^to\s+/i, '');
-      let amountKobo: bigint | undefined;
-
-      try {
-        if (amountStr.toLowerCase().endsWith('k')) {
-          const num = parseFloat(amountStr.slice(0, -1));
-          amountKobo = parseNairaToKobo(num * 1000);
-        } else {
-          amountKobo = parseNairaToKobo(amountStr);
-        }
-      } catch {
-        amountKobo = undefined;
-      }
+      const amountKobo = parseAmount(transferMatch[1]);
+      const rawRecipient = transferMatch[2].trim().replace(/^to\s+/i, '');
+      const recipient = isPlaceholderRecipient(rawRecipient) ? undefined : rawRecipient;
 
       return {
         intent: MockFinancialIntent.TRANSFER,
@@ -371,11 +380,98 @@ export class IntentParserService {
       };
     }
 
-    // Transfer keyword alone without amount or recipient (ambiguous)
-    if (lower === 'send money' || lower === 'transfer' || lower === 'send') {
+    // B. Inverted transfer regex: "5000 to Chioma", "₦5,000 to Chioma", "5k to Mum"
+    const invertedMatch = raw.match(/^(?:(?:ngn|₦)\s*)?([0-9kK,.]+)\s*(?:naira)?\s+(?:to\s+)([a-zA-Z0-9_]+)$/i);
+    if (invertedMatch) {
+      const amountKobo = parseAmount(invertedMatch[1]);
+      const rawRecipient = invertedMatch[2].trim();
+      const recipient = isPlaceholderRecipient(rawRecipient) ? undefined : rawRecipient;
+      if (amountKobo) {
+        return {
+          intent: MockFinancialIntent.TRANSFER,
+          confidence: 0.95,
+          amountKobo,
+          recipient,
+          rawText: raw,
+        };
+      }
+    }
+
+    // C. Recipient first with amount: "Chioma 5000", "to Chioma 5000", "to Chioma ₦5,000"
+    const recipientFirstMatch = raw.match(/^(?:to\s+)?([a-zA-Z0-9_]+)\s+(?:(?:ngn|₦)\s*)?([0-9kK,.]+)\s*(?:naira)?$/i);
+    if (recipientFirstMatch) {
+      const candidateRecipient = recipientFirstMatch[1].trim();
+      const amountKobo = parseAmount(recipientFirstMatch[2]);
+      if (
+        amountKobo &&
+        !['airtime', 'data', 'gb', 'mb', 'send', 'transfer', 'pay', 'deposit', 'wallet', 'history'].includes(
+          candidateRecipient.toLowerCase(),
+        )
+      ) {
+        const recipient = isPlaceholderRecipient(candidateRecipient) ? undefined : candidateRecipient;
+        return {
+          intent: MockFinancialIntent.TRANSFER,
+          confidence: 0.93,
+          amountKobo,
+          recipient,
+          rawText: raw,
+        };
+      }
+    }
+
+    // D. Recipient only (amount missing): "send money to Chioma", "transfer to Chioma", "send to Chioma", "i want to send money to Chioma"
+    const recipientOnlyMatch = raw.match(
+      /^(?:(?:please\s+)?(?:i\s*(?:want|need|would\s*like)\s*to\s*)?(?:send|transfer|pay)(?:\s+(?:some\s+)?(?:money|funds|cash|naira))?\s+to\s+)([a-zA-Z0-9_]+)$/i,
+    );
+    if (recipientOnlyMatch) {
+      const rawRecipient = recipientOnlyMatch[1].trim();
+      const recipient = isPlaceholderRecipient(rawRecipient) ? undefined : rawRecipient;
       return {
         intent: MockFinancialIntent.TRANSFER,
-        confidence: 0.8,
+        confidence: 0.94,
+        amountKobo: undefined,
+        recipient,
+        rawText: raw,
+      };
+    }
+
+    // E. Amount only (recipient missing): "send 5000", "transfer ₦10,000", "send 5k"
+    const amountOnlyMatch = raw.match(
+      /^(?:(?:please\s+)?(?:i\s*(?:want|need|would\s*like)\s*to\s*)?(?:send|transfer|pay))\s+(?:(?:ngn|₦)\s*)?([0-9kK,.]+)\s*(?:naira)?$/i,
+    );
+    if (amountOnlyMatch) {
+      const amountKobo = parseAmount(amountOnlyMatch[1]);
+      if (amountKobo) {
+        return {
+          intent: MockFinancialIntent.TRANSFER,
+          confidence: 0.94,
+          amountKobo,
+          recipient: undefined,
+          rawText: raw,
+        };
+      }
+    }
+
+    // F. General transfer intent keyword / phrase without amount or recipient (ambiguous)
+    const isGeneralTransferIntent =
+      /^(?:please\s+)?(?:i\s*(?:want|need|would\s*like)\s*to\s*)?(?:send|transfer|pay|remit)(?:\s+(?:some\s+)?(?:money|funds|cash|naira))?(?:\s+to\s+(?:someone|somone|somebody|person))?$/i.test(
+        lower,
+      ) ||
+      /\b(?:send|transfer)\s+(?:money|funds|cash)\b/i.test(lower) ||
+      lower === 'send' ||
+      lower === 'transfer' ||
+      lower === 'send money' ||
+      lower === 'transfer money' ||
+      lower === 'make a transfer' ||
+      lower === 'i want to send money' ||
+      lower === 'i want to transfer money' ||
+      lower === 'i want to send money to someone' ||
+      lower === 'i want to send money to somone';
+
+    if (isGeneralTransferIntent) {
+      return {
+        intent: MockFinancialIntent.TRANSFER,
+        confidence: 0.9,
         rawText: raw,
       };
     }

@@ -114,6 +114,29 @@ export class ConversationRouterService {
     }
 
     if (lower === 'yes' || lower === 'confirm' || lower === 'confirm it' || lower === 'no' || lower === 'cancel') {
+      if (lower !== 'no' && lower !== 'cancel') {
+        const pendingAuth = await this.prisma.transactionAuthorization.findFirst({
+          where: {
+            transaction: {
+              customerId: customer.id,
+              state: TransactionState.AWAITING_AUTHORIZATION,
+            },
+            isUsed: false,
+            expiresAt: { gt: new Date() },
+          },
+          include: { transaction: true },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (pendingAuth) {
+          const reply =
+            '🔐 *Enter Transaction PIN*\n\nPlease enter your 4-digit transaction PIN to authorize this transfer:';
+          await this.messagingService.sendTextMessage(senderPhone, reply);
+          history.push({ role: 'assistant', content: reply });
+          return reply;
+        }
+      }
+
       const pending = this.pendingSimulations.get(customer.id);
       if (lower === 'no' || lower === 'cancel') this.pendingSimulations.delete(customer.id);
       let reply = lower === 'no' || lower === 'cancel'

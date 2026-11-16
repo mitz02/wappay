@@ -8,7 +8,7 @@ import { IntentParserService, MockFinancialIntent } from './intent-parser.servic
 import { MockFinancialService } from '../../mock-financial/services/mock-financial.service';
 import type { MockCrossBorderPreview } from '../../mock-financial/interfaces/mock-financial.interface';
 import { WAPPAY_SYSTEM_PROMPT, AI_CONSTANTS } from '../ai.constants';
-import { formatKoboToNaira } from '../../../common/types';
+import { formatKoboToNaira, parseNairaToKobo } from '../../../common/types';
 import {
   GIFT_CATALOG,
   GIFT_KINDS,
@@ -28,6 +28,7 @@ import { FlowSenderService } from '../../whatsapp-flows/services/flow-sender.ser
 import { WalletService } from '../../wallet/wallet.service';
 import { RecipientsService } from '../../recipients/recipients.service';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { AuthService } from '../../authentication/auth.service';
 
 interface PendingGiftSession {
   stage: 'SELECT_GIFT' | 'DETAILS' | 'SENDER' | 'CONFIRM';
@@ -36,6 +37,13 @@ interface PendingGiftSession {
   message?: string;
   senderName?: string;
   anonymous?: boolean;
+}
+
+interface PendingTransferSession {
+  stage: 'AWAITING_DETAILS' | 'CONFIRM_DETAILS' | 'ENTER_PIN';
+  recipient?: string;
+  amountKobo?: bigint;
+  preview?: any;
 }
 
 interface PendingDataSession {
@@ -49,6 +57,7 @@ interface PendingDataSession {
 @Injectable()
 export class AIAssistantService {
   private readonly logger = new Logger(AIAssistantService.name);
+  private readonly pendingTransferSessions = new Map<string, PendingTransferSession>();
   private readonly pendingAirtimeSessions = new Map<string, { network?: string; amountKobo?: bigint; targetPhone?: string; stage: 'SELECT_NETWORK' | 'SELECT_AMOUNT' }>();
   private readonly pendingDataSessions = new Map<string, PendingDataSession>();
   private readonly pendingGiftSessions = new Map<string, PendingGiftSession>();
@@ -76,6 +85,7 @@ export class AIAssistantService {
     @Optional() private readonly flowSenderService?: FlowSenderService,
     @Optional() private readonly walletService?: WalletService,
     @Optional() private readonly recipientsService?: RecipientsService,
+    @Optional() private readonly authService?: AuthService,
   ) {}
 
   /**
@@ -301,6 +311,27 @@ export class AIAssistantService {
       this.pendingDeleteContactSessions.delete(customer.id);
     }
 
+    // 3f. Check for an active Send Money / Transfer session
+    const transferSession = this.pendingTransferSessions.get(customer.id);
+    if (transferSession) {
+      const cancelWords = ['cancel', 'abort', 'stop', 'no', 'n'];
+      const escapeWords = ['menu', 'start', 'home', 'help', 'main menu'];
+
+      if (cancelWords.includes(lowerInput)) {
+        this.pendingTransferSessions.delete(customer.id);
+        const cancelMsg = await this.mockFinancialService.cancelPendingTransfer(customer.id);
+        return `🛑 *Transfer Cancelled*\n\n${cancelMsg}`;
+      }
+
+      if (!escapeWords.includes(lowerInput)) {
+        const sessionReply = await this.continueTransferSession(customer, trimmedMessage, transferSession);
+        if (sessionReply) {
+          return sessionReply;
+        }
+      }
+      this.pendingTransferSessions.delete(customer.id);
+    }
+
     // 3. Parse Structured Intent & Entities
     const parsed = await this.intentParser.parseIntent(trimmedMessage);
     this.logger.log(
@@ -483,6 +514,12 @@ export class AIAssistantService {
             break;
           }
           if (!parsed.amountKobo || !parsed.recipient) {
+            this.pendingTransferSessions.set(customer.id, {
+              stage: 'AWAITING_DETAILS',
+              recipient: parsed.recipient,
+              amountKobo: parsed.amountKobo,
+            });
+
             reply =
               `⚠️ *Missing Transfer Details*\n\n` +
               `Please specify both the amount and recipient name.\n` +
@@ -500,6 +537,13 @@ export class AIAssistantService {
             parsed.recipient,
             parsed.amountKobo,
           );
+
+          this.pendingTransferSessions.set(customer.id, {
+            stage: 'CONFIRM_DETAILS',
+            recipient: parsed.recipient,
+            amountKobo: parsed.amountKobo,
+            preview,
+          });
 
           reply =
             `📋 *Simulated Transfer Confirmation*\n\n` +
@@ -2041,6 +2085,187 @@ export class AIAssistantService {
     }
 
     return message.slice(0, 240);
+  }
+
+
+  /**
+   * Orchestrates the streamlined Send Money / Fund Transfer flow with <= 4 replies:
+   * 1. Ask missing details (recipient/amount)
+   * 2. Confirm details of the user/recipient
+   * 3. Enter transaction PIN (input)
+   * 4. Success or failure response
+   */
+  private async continueTransferSession(
+    customer: any,
+    userMessage: string,
+    session: PendingTransferSession,
+  ): Promise<string | null> {
+    const trimmed = userMessage.trim();
+    const lower = trimmed.toLowerCase();
+
+    // Stage 1: Awaiting details (recipient, amount, or both)
+    if (session.stage === 'AWAITING_DETAILS') {
+      const parsed = await this.intentParser.parseIntent(trimmed);
+      let recipient = parsed.recipient || session.recipient;
+      let amountKobo = parsed.amountKobo || session.amountKobo;
+
+      if (!amountKobo) {
+        const numMatch = trimmed.match(/^(?:ngn|₦)?\s*([0-9kK,.]+)\s*(?:naira)?$/i);
+        if (numMatch) {
+          try {
+            const aStr = numMatch[1].replace(/,/g, '');
+            if (aStr.toLowerCase().endsWith('k')) {
+              amountKobo = parseNairaToKobo(parseFloat(aStr.slice(0, -1)) * 1000);
+            } else {
+              amountKobo = parseNairaToKobo(aStr);
+            }
+          } catch {
+            amountKobo = undefined;
+          }
+        }
+      }
+
+      if (!recipient && !amountKobo) {
+        const nameMatch = trimmed.match(/^[a-zA-Z0-9_\s]{2,40}$/);
+        if (nameMatch && !['send', 'transfer', 'pay', 'cancel', 'menu', 'yes', 'no'].includes(lower)) {
+          recipient = trimmed;
+        }
+      }
+
+      session.recipient = recipient;
+      session.amountKobo = amountKobo;
+
+      if (!recipient && !amountKobo) {
+        return (
+          `⚠️ *Details Needed*\n\n` +
+          `Please provide the recipient and amount.\n` +
+          `Example: _Send ₦5,000 to Chioma_ or _5000 to Mum_`
+        );
+      }
+
+      if (!recipient) {
+        return (
+          `👤 *Recipient Needed*\n\n` +
+          `Who would you like to send *${formatKoboToNaira(amountKobo!)}* to? (e.g. Chioma or account number)`
+        );
+      }
+
+      if (!amountKobo) {
+        return (
+          `💰 *Amount Needed*\n\n` +
+          `How much would you like to send to *${recipient}*? (e.g. 5,000)`
+        );
+      }
+
+      try {
+        const preview = await this.mockFinancialService.createTransferPreview(
+          customer.id,
+          recipient,
+          amountKobo,
+        );
+
+        session.stage = 'CONFIRM_DETAILS';
+        session.preview = preview;
+        this.pendingTransferSessions.set(customer.id, session);
+
+        return (
+          `📋 *Simulated Transfer Confirmation*\n\n` +
+          `• *Recipient:* *${preview.recipientName}*\n` +
+          `• *Account:* \`${preview.recipientAccountNumber}\` (${preview.recipientBankName})\n` +
+          `• *Amount:* *${formatKoboToNaira(preview.amountKobo)}*\n` +
+          `• *Transfer Fee:* *${formatKoboToNaira(preview.feeKobo)}*\n` +
+          `• *Total Debit:* *${formatKoboToNaira(preview.totalDebitKobo)}*\n\n` +
+          `_Reply *YES* to proceed to PIN entry or enter your 4-digit PIN to authorize (or *CANCEL* to abort)._`
+        );
+      } catch (err: any) {
+        this.pendingTransferSessions.delete(customer.id);
+        return `❌ *Transfer Failed*\n\n${err.message || 'Could not create transfer preview.'}`;
+      }
+    }
+
+    // Stage 2: Confirm details -> transition to enter PIN or accept PIN directly
+    if (session.stage === 'CONFIRM_DETAILS') {
+      const isPinDirect = /^\d{4}$/.test(trimmed);
+      const isConfirm = ['yes', 'confirm', 'proceed', 'ok', 'y', 'yep', 'sure', 'approve'].includes(lower);
+
+      if (isConfirm) {
+        session.stage = 'ENTER_PIN';
+        this.pendingTransferSessions.set(customer.id, session);
+        return (
+          `🔐 *Enter Transaction PIN*\n\n` +
+          `Please enter your 4-digit transaction PIN to authorize this transfer:\n` +
+          `_(or reply *CANCEL* to abort)_`
+        );
+      }
+
+      if (isPinDirect) {
+        return await this.executeTransferWithPin(customer, trimmed, session);
+      }
+
+      return `_Reply *YES* to proceed to PIN entry, enter your 4-digit PIN to authorize, or *CANCEL* to abort._`;
+    }
+
+    // Stage 3: Enter PIN -> Execute transfer (Step 4: Success or Failure response)
+    if (session.stage === 'ENTER_PIN') {
+      const pinMatch = trimmed.match(/^(?:pin[:\s]*)?([0-9]{4})$/i);
+      if (!pinMatch) {
+        return (
+          `❌ *Invalid PIN Format*\n\n` +
+          `Please enter your 4-digit transaction PIN (e.g. 1234) or reply *CANCEL* to abort.`
+        );
+      }
+      return await this.executeTransferWithPin(customer, pinMatch[1], session);
+    }
+
+    return null;
+  }
+
+  private async executeTransferWithPin(
+    customer: any,
+    pin: string,
+    session: PendingTransferSession,
+  ): Promise<string> {
+    try {
+      if (this.authService && customer.pinHash) {
+        const pinCheck = await this.authService.verifyCustomerPin(customer.id, pin);
+        if (!pinCheck.success) {
+          return `❌ *Transfer Failed*\n\n${pinCheck.error || 'Incorrect transaction PIN. Please try again.'}`;
+        }
+      }
+
+      const result = await this.mockFinancialService.confirmTransfer(
+        customer.id,
+        pin,
+      );
+      this.pendingTransferSessions.delete(customer.id);
+
+      if (result.transactionType === 'PAYMENT') {
+        return (
+          `✅ *Payment Sent!*\n\n` +
+          `• *Amount:* ${formatKoboToNaira(result.amountKobo)}\n` +
+          `• *Paid to:* ${result.recipientName}\n` +
+          `• *Account:* ${result.recipientAccountNumber} (${result.recipientBankName})\n` +
+          `• *Fee:* ${formatKoboToNaira(result.feeKobo)}\n` +
+          `• *Reference:* \`${result.internalReference}\`\n` +
+          `• *Available Balance:* *${formatKoboToNaira(result.newBalanceKobo)}*\n\n` +
+          `_Note: This was a simulated payment. No real money was moved._`
+        );
+      }
+
+      return (
+        `✅ *Simulated Transfer Successful!*\n\n` +
+        `• *Amount:* ${formatKoboToNaira(result.amountKobo)}\n` +
+        `• *Recipient:* ${result.recipientName}\n` +
+        `• *Account:* ${result.recipientAccountNumber} (${result.recipientBankName})\n` +
+        `• *Fee:* ${formatKoboToNaira(result.feeKobo)}\n` +
+        `• *Reference:* \`${result.internalReference}\`\n` +
+        `• *Available Balance:* *${formatKoboToNaira(result.newBalanceKobo)}*\n\n` +
+        `_Note: This was a simulated transfer on mock rails. No real money was moved._`
+      );
+    } catch (err: any) {
+      this.pendingTransferSessions.delete(customer.id);
+      return `❌ *Transfer Failed*\n\n${err.message || 'The transfer could not be authorized.'}`;
+    }
   }
 
   private resolveNetworkChoice(input: string): string | undefined {
